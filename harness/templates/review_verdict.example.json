@@ -1,0 +1,20 @@
+{
+  "gateId": "QA-20260724-001",
+  "taskId": "TASK-0001",
+  "pullRequest": 1,
+  "fixedCommitSha": "0000000000000000000000000000000000000000",
+  "implementationLeaseId": "00000000-0000-4000-8000-000000000001",
+  "reviewLeaseId": "00000000-0000-4000-8000-000000000002",
+  "implementerSession": "codex-session-example",
+  "reviewerSession": "claude-session-example",
+  "verdict": "PASS",
+  "recommendation": "MERGE_CANDIDATE",
+  "requiredTestCount": 1,
+  "passedTestCount": 1,
+  "skippedTestCount": 0,
+  "requiredRegressionIds": [],
+  "executedRegressionIds": [],
+  "evidencePath": "<git-common-dir>/sns-marketing-harness/reviews/QA-20260724-001",
+  "testStartedAt": "2026-07-24T00:00:00Z",
+  "testedAt": "2026-07-24T00:00:00Z"
+}

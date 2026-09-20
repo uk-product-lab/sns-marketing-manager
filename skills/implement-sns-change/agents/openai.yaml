@@ -1,0 +1,4 @@
+interface:
+  display_name: "SNS実装スライス"
+  short_description: "承認済みIssueを安全に実装しレビュー可能な状態へ引き渡す"
+  default_prompt: "Use $implement-sns-change to implement the assigned SNS project issue and prepare a review-ready handoff."

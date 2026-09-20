@@ -1,0 +1,4 @@
+interface:
+  display_name: "SNSレビューゲート"
+  short_description: "独立レビューと実ブラウザE2Eで次工程への進行を判定する"
+  default_prompt: "Use $review-sns-change to independently review the assigned change and issue a PASS, FAIL, or BLOCKED gate result."

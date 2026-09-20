@@ -1,4 +1,26 @@
+# ChatGPT project reference sources are local-only and read-only.
+sources/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dependencies and build output
 node_modules/
 dist/
+.wrangler/
+.dev.vars
+
+# Test and review evidence
+artifacts/
+coverage/
+playwright-report/
+test-results/
+
+# Local OS and editor state
 .DS_Store
-*.log
+*.swp
+

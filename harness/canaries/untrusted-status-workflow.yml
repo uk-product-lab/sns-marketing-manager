@@ -1,0 +1,39 @@
+name: Untrusted status source canary
+
+on:
+  push:
+
+permissions:
+  contents: read
+  statuses: write
+
+jobs:
+  spoof-required-contexts:
+    name: canary/untrusted-status-source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish same-name statuses from the shared GitHub Actions App
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const contexts = [
+              "governance/protected-files",
+              "quality/static",
+              "quality/unit",
+              "quality/e2e-chromium",
+              "quality/e2e-webkit-mobile",
+              "quality/accessibility",
+              "review/independent",
+            ];
+            for (const statusContext of contexts) {
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: context.sha,
+                state: "success",
+                context: statusContext,
+                description: "NEGATIVE TEST: untrusted Actions source",
+                target_url:
+                  `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+              });
+            }

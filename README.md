@@ -69,20 +69,36 @@ MVPでは媒体別原稿、画像スライド、短尺動画、投稿予定、�
 - 実装担当Skill: `skills/implement-sns-change/`
 - レビュー担当Skill: `skills/review-sns-change/`
 
-## 既存スターターの起動
+## ローカル開発と品質検証
 
 ```bash
-npm install
+npm ci
+npm run setup:browsers
 npm run dev
 ```
 
-表示されたローカルURLをブラウザで開いてください。ビルドは `npm run build`、ビルド結果の確認は `npm run preview` です。
+Node.js 24（`.node-version`記載）とnpm 11を使用します。表示されたローカルURLをブラウザで開いてください。
 
-- `src/index.html`: 画面の土台
-- `src/styles.css`: 見た目のスタイル
-- `src/main.js`: 動作確認ボタン
+品質検証は個別または一括で実行できます。すべてローカルの合成データを使い、実Cloudflareアカウントや外部SNSへ接続しません。
 
-現在のスターターはJavaScriptとViteの最小構成です。次の技術構成はSNS管理機能を実装する際の方針です。
+```bash
+npm run typecheck
+npm run lint
+npm run test:unit
+npm run test:migration
+npm run build
+npm run test:e2e
+npm run test:smoke
+npm run test:boundaries
+npm run quality
+```
+
+- `src/`: React + TypeScriptの最小アプリシェル
+- `migrations/`: ローカルD1互換の初期マイグレーション
+- `e2e/`: Chromium desktop・WebKit mobile・axe検証
+- `scripts/`: D1、production smoke、外部通信境界の検証
+
+この基盤はSNS管理機能そのものではありません。次の技術構成は後続機能を実装する際の方針です。
 
 ## 技術方針
 

@@ -1,6 +1,15 @@
 import { defineConfig } from "@playwright/test";
 
-const baseURL = "http://127.0.0.1:4173";
+const rawPort = process.env.SNS_E2E_PORT;
+const port = Number(rawPort);
+
+if (!rawPort || !Number.isInteger(port) || port < 1 || port > 65_535) {
+  throw new Error(
+    "SNS_E2E_PORT must be an available TCP port supplied by npm run test:e2e.",
+  );
+}
+
+const baseURL = `http://127.0.0.1:${String(port)}`;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -20,7 +29,7 @@ export default defineConfig({
     video: "off",
   },
   webServer: {
-    command: "npm run preview -- --port 4173 --strictPort",
+    command: `npm run preview -- --port ${String(port)} --strictPort`,
     url: baseURL,
     reuseExistingServer: false,
     timeout: 120_000,

@@ -80,6 +80,7 @@ npm run dev
 Node.js 24（`.node-version`記載）とnpm 11を使用します。表示されたローカルURLをブラウザで開いてください。
 
 品質検証は個別または一括で実行できます。すべてローカルの合成データを使い、実Cloudflareアカウントや外部SNSへ接続しません。
+E2Eとsmokeは空いているloopbackポートを実行ごとに取得するため、他プロジェクトのローカルサーバーを停止しません。E2Eは通信失敗に加えてHTTP 4xx・5xxも検出します。
 
 ```bash
 npm run typecheck

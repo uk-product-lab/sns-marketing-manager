@@ -17,7 +17,7 @@
     "lint": "eslint . --max-warnings 0",
     "test:unit": "vitest run --reporter=verbose",
     "test:migration": "node scripts/test-d1-migrations.mjs",
-    "test:e2e": "npm run build && playwright test",
+    "test:e2e": "npm run build && node scripts/run-playwright.mjs",
     "test:smoke": "npm run build && node scripts/test-smoke.mjs",
     "test:boundaries": "node scripts/test-boundaries.mjs",
     "quality": "npm run test:boundaries && npm run typecheck && npm run lint && npm run test:unit && npm run test:migration && npm run build && npm run test:e2e && npm run test:smoke"

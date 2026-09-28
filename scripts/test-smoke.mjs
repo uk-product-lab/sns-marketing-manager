@@ -3,8 +3,10 @@ import { fileURLToPath } from "node:url";
 
 import { preview } from "vite";
 
+import { getAvailableLoopbackPort } from "./local-port.mjs";
+
 const projectRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-const port = 4174;
+const port = await getAvailableLoopbackPort();
 const server = await preview({
   configFile: path.join(projectRoot, "vite.config.ts"),
   preview: {

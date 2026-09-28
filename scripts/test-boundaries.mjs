@@ -59,6 +59,23 @@ const networkCallPattern =
 const unscopedNetworkPattern = /\bXMLHttpRequest\s*\(/u;
 const allowedNetworkTargetPattern =
   /^(?:\/(?!\/)|\.\.?\/|https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?(?:\/|$))/u;
+const srcsetAttributePattern =
+  /\bsrcset\s*=\s*(?:\{\s*)?(?:"([^"]*)"|'([^']*)'|`([^`]*)`|([^\s>]+))/giu;
+const externalProtocolRelativeCandidatePattern =
+  /^\/\/(?!(?:127\.0\.0\.1|localhost)(?::\d+)?(?:[/?#]|$))[^\s,]+/iu;
+
+function hasExternalSrcsetCandidate(content) {
+  for (const match of content.matchAll(srcsetAttributePattern)) {
+    const value = match[1] ?? match[2] ?? match[3] ?? match[4] ?? "";
+    if (
+      value.split(",").some((candidate) =>
+        externalProtocolRelativeCandidatePattern.test(candidate.trimStart()))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
 
 class BoundaryViolation extends Error {
   constructor(findings) {
@@ -99,6 +116,13 @@ function inspectContent(file, content) {
     if (rule.pattern.test(content)) {
       findings.push({ file, rule: rule.id });
     }
+  }
+
+  if (
+    !findings.some((finding) => finding.rule === "external-protocol-relative-url") &&
+    hasExternalSrcsetCandidate(content)
+  ) {
+    findings.push({ file, rule: "external-protocol-relative-url" });
   }
 
   for (const match of content.matchAll(networkCallPattern)) {
@@ -184,6 +208,26 @@ try {
       content: ".hero { background:url(//[2606:4700::1111]/pixel); }\n",
       expectedRule: "external-protocol-relative-url",
     },
+    {
+      name: "protocol-relative-srcset-later.html",
+      content: '<img srcset="/local.png 1x, //example.com/pixel 2x" />\n',
+      expectedRule: "external-protocol-relative-url",
+    },
+    {
+      name: "protocol-relative-srcset-third.html",
+      content: '<img SRCSET="//localhost:4173/one.png 1x, /two.png 2x, //localhost.example.com/pixel 3x" />\n',
+      expectedRule: "external-protocol-relative-url",
+    },
+    {
+      name: "protocol-relative-srcset-jsx.tsx",
+      content: 'export const image = <img srcSet={"/local.png 1x, //example.com/pixel 2x"} />;\n',
+      expectedRule: "external-protocol-relative-url",
+    },
+    {
+      name: "protocol-relative-srcset-multiline.html",
+      content: '<img srcset="/local.png 1x,\n //example.com/pixel 2x" />\n',
+      expectedRule: "external-protocol-relative-url",
+    },
   ];
 
   for (const fixture of negativeFixtures) {
@@ -215,8 +259,22 @@ try {
     "utf8",
   );
   await assertBoundaries([allowedProtocolRelativeFixture]);
+  const allowedSrcsetFixture = path.join(fixtureDirectory, "local-srcset.html");
+  await writeFile(
+    allowedSrcsetFixture,
+    '<img srcset="/one.png 1x, //localhost:4173/two.png 2x, //127.0.0.1:4173/three.png 3x" />\n',
+    "utf8",
+  );
+  await assertBoundaries([allowedSrcsetFixture]);
+  const allowedMultilineSrcsetFixture = path.join(fixtureDirectory, "local-srcset-multiline.html");
+  await writeFile(
+    allowedMultilineSrcsetFixture,
+    '<img srcset="/one.png 1x,\n //localhost/two.png 2x,\n //127.0.0.1/three.png 3x" />\n',
+    "utf8",
+  );
+  await assertBoundaries([allowedMultilineSrcsetFixture]);
   console.log(
-    `Boundary fixtures passed: ${String(negativeFixtures.length)} forbidden cases rejected and local HTTP/protocol-relative URLs allowed.`,
+    `Boundary fixtures passed: ${String(negativeFixtures.length)} forbidden cases rejected and local HTTP/protocol-relative URLs, including srcset candidates, allowed.`,
   );
 } finally {
   await rm(fixtureDirectory, { recursive: true, force: true });

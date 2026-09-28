@@ -48,7 +48,7 @@ const forbiddenPatterns = [
 ];
 
 const localBase = "http://localhost/";
-const urlAttributes = new Set(["src", "href", "action", "poster", "formaction", "xlink:href"]);
+const urlAttributes = new Set(["src", "href", "action", "poster", "formaction", "xlink:href", "background"]);
 const srcsetAttributes = new Set(["srcset", "imagesrcset"]);
 const scriptExtensions = new Set([".js", ".jsx", ".ts", ".tsx"]);
 const asciiWhitespace = /[\t\n\f\r ]/u;
@@ -161,15 +161,17 @@ function inspectHtml(content, file, findings, depth = 0) {
     addFinding(findings, file, "network-target-dynamic");
     return;
   }
-  const fragment = JSDOM.fragment(content);
-  for (const element of fragment.querySelectorAll("*")) {
+  // Document mode preserves attributes on explicit <html>/<body> tags; fragment mode drops them.
+  const document = new JSDOM(content).window.document;
+  for (const element of document.querySelectorAll("*")) {
     for (const attribute of element.attributes) {
       const name = attribute.name.toLowerCase();
       const value = attribute.value;
       if (srcsetAttributes.has(name)) inspectSrcset(value, file, findings);
       else if (urlAttributes.has(name)) {
         inspectUrl(value, file, findings, {
-          allowData: name === "src" && ["img", "source"].includes(element.localName),
+          allowData: (name === "src" && ["img", "source"].includes(element.localName)) ||
+            name === "background",
         });
       } else if (name === "data" && element.localName === "object") {
         inspectUrl(value, file, findings);
@@ -180,6 +182,10 @@ function inspectHtml(content, file, findings, depth = 0) {
       } else if (name === "style") inspectCss(value, file, findings);
       else if (name === "srcdoc") inspectHtml(value, file, findings, depth + 1);
       else if (/^on[a-z]+$/u.test(name)) inspectScript(value, file, findings, ".js");
+      else if (looksUrlLike(value)) {
+        // An unlisted attribute can still load a resource (for example, body background).
+        inspectUrl(value, file, findings, { allowData: true });
+      }
     }
     if (element.localName === "style") inspectCss(element.textContent, file, findings);
     if (element.localName === "template") inspectHtml(element.innerHTML, file, findings, depth + 1);
@@ -265,7 +271,7 @@ function inspectScript(content, file, findings, extension) {
         const value = staticString(node.initializer);
         if (value === null) addFinding(findings, file, "network-target-dynamic");
         else if (srcsetAttributes.has(name)) inspectSrcset(value, file, findings);
-        else inspectUrl(value, file, findings, { allowData: name === "src" });
+        else inspectUrl(value, file, findings, { allowData: name === "src" || name === "background" });
       }
     }
     if (ts.isJsxAttribute(node)) {
@@ -281,7 +287,7 @@ function inspectScript(content, file, findings, extension) {
         }
         if (value === null) addFinding(findings, file, "network-target-dynamic");
         else if (srcsetAttributes.has(name)) inspectSrcset(value, file, findings);
-        else inspectUrl(value, file, findings, { allowData: name === "src" });
+        else inspectUrl(value, file, findings, { allowData: name === "src" || name === "background" });
       }
     } else if (ts.isJsxSpreadAttribute(node)) {
       addFinding(findings, file, "network-target-dynamic");
@@ -518,6 +524,26 @@ try {
       expectedRule: "external-protocol-relative-url",
     },
     {
+      name: "protocol-relative-body-background.html",
+      content: '<!doctype html><body background="//example.com/pixel"></body>\n',
+      expectedRule: "external-protocol-relative-url",
+    },
+    {
+      name: "protocol-relative-body-background-entity.html",
+      content: '<!doctype html><body background="&#47;&#47;example.com/pixel"></body>\n',
+      expectedRule: "external-protocol-relative-url",
+    },
+    {
+      name: "protocol-relative-body-background-entity.tsx",
+      content: 'export const body = <body background="&#47;&#47;example.com/pixel" />;\n',
+      expectedRule: "external-protocol-relative-url",
+    },
+    {
+      name: "dynamic-body-background.tsx",
+      content: 'export const body = <body background={imageUrl} />;\n',
+      expectedRule: "network-target-dynamic",
+    },
+    {
       name: "protocol-relative-srcset-parenthesized.tsx",
       content: 'export const image = <img srcSet={("/local.png 1x, //example.com/pixel 2x")} />;\n',
       expectedRule: "external-protocol-relative-url",
@@ -654,6 +680,13 @@ try {
     "utf8",
   );
   await assertBoundaries([allowedTemplateFixture]);
+  const allowedBackgroundFixture = path.join(fixtureDirectory, "local-background.html");
+  await writeFile(
+    allowedBackgroundFixture,
+    '<!doctype html><body background="//localhost:4173/pixel" aria-label="Local preview"></body>\n',
+    "utf8",
+  );
+  await assertBoundaries([allowedBackgroundFixture]);
   console.log(
     `Boundary fixtures passed: ${String(negativeFixtures.length)} forbidden cases rejected and local HTTP/protocol-relative URLs, including srcset candidates, allowed.`,
   );

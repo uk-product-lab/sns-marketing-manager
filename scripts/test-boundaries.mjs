@@ -39,6 +39,11 @@ const forbiddenPatterns = [
     pattern: /https?:\/\/(?!(?:127\.0\.0\.1|localhost)(?::\d+)?(?:\/|["'`]))[^\s"'`)]+/iu,
   },
   {
+    id: "external-protocol-relative-url",
+    pattern:
+      /(?:["'`]\s*|\burl\(\s*|\b(?:src|href|action|poster|srcset|formaction)\s*=\s*)\/\/(?!(?:127\.0\.0\.1|localhost)(?::\d+)?(?:[/?#"'`)\s]|$))(?=[^\s"'`)]+)/iu,
+  },
+  {
     id: "external-sns-or-paid-service",
     pattern:
       /(?:api\.(?:x|twitter)\.com|graph\.(?:facebook|instagram)\.com|open\.tiktokapis\.com|note\.com\/api|api\.resend\.com|api\.sendgrid\.com|api\.stripe\.com|drive\.googleapis\.com|r2\.cloudflarestorage\.com)/iu,
@@ -154,6 +159,31 @@ try {
       content: "export const request = (endpoint) => fetch(endpoint);\n",
       expectedRule: "network-target-dynamic",
     },
+    {
+      name: "protocol-relative-image.html",
+      content: '<img src="//example.com/pixel" />\n',
+      expectedRule: "external-protocol-relative-url",
+    },
+    {
+      name: "protocol-relative-css.css",
+      content: ".hero { background:url(//example.com/pixel); }\n",
+      expectedRule: "external-protocol-relative-url",
+    },
+    {
+      name: "protocol-relative-unquoted.html",
+      content: "<img src=//example.com/pixel />\n",
+      expectedRule: "external-protocol-relative-url",
+    },
+    {
+      name: "protocol-relative-lookalike.html",
+      content: '<img src="//localhost.example.com/pixel" />\n',
+      expectedRule: "external-protocol-relative-url",
+    },
+    {
+      name: "protocol-relative-ipv6.css",
+      content: ".hero { background:url(//[2606:4700::1111]/pixel); }\n",
+      expectedRule: "external-protocol-relative-url",
+    },
   ];
 
   for (const fixture of negativeFixtures) {
@@ -175,8 +205,18 @@ try {
     "utf8",
   );
   await assertBoundaries([allowedFixture]);
+  const allowedProtocolRelativeFixture = path.join(
+    fixtureDirectory,
+    "local-protocol-relative.html",
+  );
+  await writeFile(
+    allowedProtocolRelativeFixture,
+    '<img src="//localhost:4173/pixel" /><style>.hero { background:url(//127.0.0.1:4173/pixel); }</style>\n',
+    "utf8",
+  );
+  await assertBoundaries([allowedProtocolRelativeFixture]);
   console.log(
-    `Boundary fixtures passed: ${String(negativeFixtures.length)} forbidden categories rejected and local HTTP allowed.`,
+    `Boundary fixtures passed: ${String(negativeFixtures.length)} forbidden cases rejected and local HTTP/protocol-relative URLs allowed.`,
   );
 } finally {
   await rm(fixtureDirectory, { recursive: true, force: true });

@@ -1,0 +1,95 @@
+name: PR quality gates
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.event.pull_request.number }}-${{ github.event.pull_request.head.sha }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: ci/${{ matrix.gate }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [static, unit, e2e-chromium, e2e-webkit-mobile, accessibility]
+    steps:
+      - name: Check out trusted default-branch harness
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          path: trusted
+          persist-credentials: false
+      - name: Check out fixed product head
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: 3.12.14
+      - name: Pin npm and check runtime
+        run: |
+          npm install --global npm@11.12.1
+          test "$(node --version)" = "v24.15.0"
+          test "$(npm --version)" = "11.12.1"
+      - name: Enforce trusted governance boundary
+        if: ${{ matrix.gate == 'static' }}
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          FIXED_SHA: ${{ github.event.pull_request.head.sha }}
+          GOVERNANCE_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'governance:approved') }}
+        working-directory: trusted
+        run: |
+          git fetch --no-tags origin "$FIXED_SHA"
+          arguments=("$BASE_SHA" "$FIXED_SHA")
+          if [ "$GOVERNANCE_APPROVED" = "true" ]; then arguments+=("--governance-approved"); fi
+          node harness/scripts/assert-harness-diff.mjs "${arguments[@]}"
+      - name: Install real product dependencies
+        run: >-
+          node trusted/harness/scripts/ci-quality.mjs
+          --product-root product --gate install
+          --fixed-sha "${{ github.event.pull_request.head.sha }}"
+          --output "artifacts/ci/install-${{ matrix.gate }}"
+      - name: Install clean Linux browser and OS dependencies
+        if: ${{ matrix.gate == 'e2e-chromium' || matrix.gate == 'e2e-webkit-mobile' || matrix.gate == 'accessibility' }}
+        run: >-
+          node trusted/harness/scripts/ci-quality.mjs --product-root product --gate browsers
+          --fixed-sha "${{ github.event.pull_request.head.sha }}"
+          --output "artifacts/ci/browsers-${{ matrix.gate }}"
+      - name: Execute trusted real quality gate
+        run: >-
+          node trusted/harness/scripts/ci-quality.mjs
+          --product-root product --gate "${{ matrix.gate }}"
+          --fixed-sha "${{ github.event.pull_request.head.sha }}"
+          --output "artifacts/ci/${{ matrix.gate }}"
+      - name: Check combined upload size without truncating evidence
+        id: budget
+        if: ${{ always() }}
+        run: >-
+          node trusted/harness/scripts/ci-upload-budget.mjs
+          "artifacts/ci/install-${{ matrix.gate }}"
+          "artifacts/ci/browsers-${{ matrix.gate }}"
+          "artifacts/ci/${{ matrix.gate }}"
+      - name: Upload bounded real evidence including failures
+        if: ${{ always() && steps.budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ matrix.gate }}-${{ github.event.pull_request.head.sha }}
+          path: |
+            artifacts/ci/install-${{ matrix.gate }}/
+            artifacts/ci/browsers-${{ matrix.gate }}/
+            artifacts/ci/${{ matrix.gate }}/
+          if-no-files-found: error
+          retention-days: 1

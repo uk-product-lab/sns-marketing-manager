@@ -1,0 +1,812 @@
+name: Independent browser review board gate
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+
+permissions: {}
+
+env:
+  BOARD_REVIEWER_LOGIN: ukyo-0001
+  AUTOMATION_LOGIN: ukyo-0001
+
+jobs:
+  prepare:
+    name: review/prepare-attestation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    outputs:
+      found: ${{ steps.select.outputs.found }}
+      pull_request: ${{ steps.select.outputs.pull_request }}
+      fixed_sha: ${{ steps.select.outputs.fixed_sha }}
+      gate_id: ${{ steps.select.outputs.gate_id }}
+      evidence_sha256: ${{ steps.select.outputs.evidence_sha256 }}
+      evidence_commit_sha: ${{ steps.select.outputs.evidence_commit_sha }}
+      evidence_branch: ${{ steps.select.outputs.evidence_branch }}
+      base_sha: ${{ steps.select.outputs.base_sha }}
+      governance_approved: ${{ steps.select.outputs.governance_approved }}
+    steps:
+      - name: Select and validate oldest pending attestation
+        id: select
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const marker = "<!-- sns-review-attestation:v1 -->";
+            const { data: repository } = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const defaultBranchName = repository.default_branch;
+            const { data: defaultBranch } = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: defaultBranchName,
+            });
+            const defaultBranchSha = defaultBranch.commit.sha;
+            const pulls = await github.paginate(github.rest.pulls.list, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              sort: "created",
+              direction: "asc",
+              per_page: 100,
+            });
+            for (const candidate of pulls.filter((pull) =>
+              pull.labels.some((label) => label.name === "review:board-pending")
+            )) {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: candidate.number,
+                per_page: 100,
+              });
+              const comment = comments
+                .filter(
+                  (item) =>
+                    item.body?.startsWith(marker) &&
+                    item.user?.login?.toLowerCase() ===
+                      process.env.AUTOMATION_LOGIN.toLowerCase()
+                )
+                .at(-1);
+              let stale = !comment;
+              if (comment) {
+                try {
+                  const attestation = JSON.parse(
+                    comment.body.slice(marker.length).trim()
+                  );
+                  const evidenceRef = await github.rest.git.getRef({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    ref: `heads/${attestation.evidenceBranch}`,
+                  });
+                  stale =
+                    attestation.fixedCommitSha !== candidate.head.sha ||
+                    evidenceRef.data.object.sha !== attestation.evidenceCommitSha ||
+                    candidate.base.ref !== defaultBranchName ||
+                    candidate.base.sha !== defaultBranchSha ||
+                    attestation.baseBranch !== defaultBranchName ||
+                    attestation.baseSha !== defaultBranchSha;
+                } catch {
+                  stale = true;
+                }
+              }
+              if (stale) {
+                await github.rest.issues.removeLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: candidate.number,
+                  name: "review:board-pending",
+                }).catch(() => undefined);
+                await github.rest.issues.addLabels({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: candidate.number,
+                  labels: ["review:stale"],
+                });
+              }
+            }
+            const pr = pulls.find((candidate) =>
+              candidate.labels.some((label) => label.name === "review:awaiting-board")
+            );
+            if (!pr) {
+              core.setOutput("found", "false");
+              core.info("No pending board review attestation");
+              return;
+            }
+
+            try {
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                per_page: 100,
+              });
+              const candidates = comments.filter(
+                (comment) =>
+                  comment.body?.startsWith(marker) &&
+                  comment.user?.login?.toLowerCase() ===
+                    process.env.AUTOMATION_LOGIN.toLowerCase()
+              );
+              const comment = candidates.at(-1);
+              if (!comment) throw new Error("Attestation comment not found");
+              const labelEvents = await github.paginate(github.rest.issues.listEvents, {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                per_page: 100,
+              });
+              const awaitingBoardEvent = labelEvents
+                .filter(
+                  (event) =>
+                    event.event === "labeled" &&
+                    event.label?.name === "review:awaiting-board"
+                )
+                .at(-1);
+              if (
+                awaitingBoardEvent?.actor?.login?.toLowerCase() !==
+                process.env.AUTOMATION_LOGIN.toLowerCase()
+              ) {
+                throw new Error(
+                  "review:awaiting-board was not applied by the declared automation login"
+                );
+              }
+              const attestation = JSON.parse(comment.body.slice(marker.length).trim());
+              const required = Number(attestation.requiredTestCount);
+              const passed = Number(attestation.passedTestCount);
+              const skipped = Number(attestation.skippedTestCount);
+              const evidenceBytes = Number(attestation.evidenceBytes);
+              const evidenceFileCount = Number(attestation.evidenceFileCount);
+              const uuid = /^[0-9a-f-]{36}$/i;
+              const comparison = await github.request(
+                "GET /repos/{owner}/{repo}/compare/{basehead}",
+                {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  basehead: `${defaultBranchSha}...${pr.head.sha}`,
+                }
+              );
+              if (
+                !/^[A-Za-z0-9][A-Za-z0-9_-]{2,79}$/.test(attestation.gateId) ||
+                attestation.pullRequest !== pr.number ||
+                attestation.fixedCommitSha !== pr.head.sha ||
+                pr.base.ref !== defaultBranchName ||
+                pr.base.sha !== defaultBranchSha ||
+                attestation.baseBranch !== defaultBranchName ||
+                attestation.baseSha !== defaultBranchSha ||
+                !["ahead", "identical"].includes(comparison.data.status) ||
+                !/^[a-f0-9]{40}$/i.test(attestation.fixedCommitSha) ||
+                attestation.verdict !== "PASS" ||
+                attestation.recommendation !== "MERGE_CANDIDATE" ||
+                attestation.implementerSession === attestation.reviewerSession ||
+                !uuid.test(attestation.implementationLeaseId) ||
+                !uuid.test(attestation.reviewLeaseId) ||
+                !Number.isInteger(required) ||
+                required <= 0 ||
+                passed !== required ||
+                skipped !== 0 ||
+                !Array.isArray(attestation.requiredRegressionIds) ||
+                !Array.isArray(attestation.executedRegressionIds) ||
+                JSON.stringify([...attestation.requiredRegressionIds].sort()) !==
+                JSON.stringify([...attestation.executedRegressionIds].sort()) ||
+                !/^[a-f0-9]{64}$/i.test(attestation.evidenceSha256) ||
+                !/^[a-f0-9]{40}$/i.test(attestation.evidenceCommitSha) ||
+                attestation.evidenceBranch !== `review-evidence/${attestation.gateId}` ||
+                !Number.isInteger(evidenceBytes) ||
+                evidenceBytes <= 0 ||
+                evidenceBytes > 20 * 1024 * 1024 ||
+                !Number.isInteger(evidenceFileCount) ||
+                evidenceFileCount <= 0 ||
+                evidenceFileCount > 500 ||
+                Number.isNaN(Date.parse(attestation.testStartedAt)) ||
+                Number.isNaN(Date.parse(attestation.testedAt)) ||
+                Number.isNaN(Date.parse(attestation.reviewLeaseStartedAt)) ||
+                Number.isNaN(Date.parse(attestation.reviewLeaseExpiresAt)) ||
+                Date.parse(attestation.reviewLeaseStartedAt) > Date.parse(attestation.testStartedAt) ||
+                Date.parse(attestation.testStartedAt) > Date.parse(attestation.testedAt) ||
+                Date.parse(attestation.testedAt) > Date.parse(attestation.reviewLeaseExpiresAt) ||
+                Number.isNaN(Date.parse(attestation.submittedAt)) ||
+                Date.parse(attestation.testedAt) > Date.parse(attestation.submittedAt) ||
+                Date.parse(attestation.submittedAt) > Date.now() + 60_000
+              ) {
+                throw new Error("Attestation fields are invalid or inconsistent");
+              }
+
+              const evidenceRef = await github.rest.git.getRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: `heads/${attestation.evidenceBranch}`,
+              });
+              if (evidenceRef.data.object.sha !== attestation.evidenceCommitSha) {
+                throw new Error("Evidence branch does not point to the attested commit");
+              }
+              const evidenceCommit = await github.rest.git.getCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: attestation.evidenceCommitSha,
+              });
+              const treeResponse = await github.rest.git.getTree({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tree_sha: evidenceCommit.data.tree.sha,
+                recursive: "true",
+              });
+              if (treeResponse.data.truncated) {
+                throw new Error("Evidence tree is too large to verify");
+              }
+              const tree = treeResponse.data.tree;
+              const manifestEntry = tree.find(
+                (entry) => entry.path === "manifest.json" && entry.type === "blob"
+              );
+              if (!manifestEntry) throw new Error("Evidence manifest is missing");
+              const evidenceFiles = tree
+                .filter((entry) => entry.path?.startsWith("evidence/") && entry.type === "blob")
+                .sort((left, right) => left.path.localeCompare(right.path));
+              if (
+                evidenceFiles.length !== evidenceFileCount ||
+                evidenceFiles.some((entry) => entry.mode === "120000")
+              ) {
+                throw new Error("Evidence file count or type is invalid");
+              }
+              const requiredFiles = [
+                "evidence/summary.md",
+                "evidence/test-results.xml",
+                "evidence/console.log",
+                "evidence/network.log",
+                "evidence/accessibility.json",
+                "evidence/environment.json",
+                "evidence/review-verdict.json",
+                "evidence/lease-proof.json",
+              ];
+              const requiredPrefixes = [
+                "evidence/playwright-report/",
+                "evidence/screenshots/mac/",
+                "evidence/screenshots/iphone/",
+                "evidence/traces/",
+              ];
+              const fileNames = new Set(evidenceFiles.map((entry) => entry.path));
+              if (
+                requiredFiles.some((path) => !fileNames.has(path)) ||
+                requiredPrefixes.some(
+                  (prefix) => !evidenceFiles.some((entry) => entry.path.startsWith(prefix))
+                )
+              ) {
+                throw new Error("Required evidence files or directories are missing");
+              }
+
+              async function blobBuffer(entry) {
+                const blob = await github.rest.git.getBlob({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  file_sha: entry.sha,
+                });
+                if (blob.data.encoding !== "base64") {
+                  throw new Error(`Unsupported blob encoding for ${entry.path}`);
+                }
+                return Buffer.from(blob.data.content.replace(/\n/g, ""), "base64");
+              }
+
+              const crypto = require("node:crypto");
+              const hash = crypto.createHash("sha256");
+              const evidenceContent = new Map();
+              let verifiedBytes = 0;
+              for (const entry of evidenceFiles) {
+                const content = await blobBuffer(entry);
+                evidenceContent.set(entry.path, content);
+                verifiedBytes += content.length;
+                hash.update(entry.path.slice("evidence/".length));
+                hash.update("\0");
+                hash.update(content);
+                hash.update("\0");
+              }
+              const verifiedDigest = hash.digest("hex");
+              if (
+                verifiedBytes !== evidenceBytes ||
+                verifiedDigest !== attestation.evidenceSha256
+              ) {
+                throw new Error("Evidence bytes or SHA-256 digest does not match");
+              }
+              const manifest = JSON.parse(
+                (await blobBuffer(manifestEntry)).toString("utf8")
+              );
+              const manifestChecks = {
+                schemaVersion: 1,
+                gateId: attestation.gateId,
+                taskId: attestation.taskId,
+                pullRequest: attestation.pullRequest,
+                fixedCommitSha: attestation.fixedCommitSha,
+                testStartedAt: attestation.testStartedAt,
+                testedAt: attestation.testedAt,
+                evidenceSha256: attestation.evidenceSha256,
+                evidenceBytes,
+                evidenceFileCount,
+              };
+              for (const [field, expected] of Object.entries(manifestChecks)) {
+                if (manifest[field] !== expected) {
+                  throw new Error(`Evidence manifest mismatch: ${field}`);
+                }
+              }
+
+              const environment = JSON.parse(
+                evidenceContent.get("evidence/environment.json").toString("utf8")
+              );
+              if (
+                environment.fixedCommitSha !== attestation.fixedCommitSha ||
+                environment.testStartedAt !== attestation.testStartedAt ||
+                environment.testedAt !== attestation.testedAt
+              ) {
+                throw new Error("Evidence environment does not match the attestation");
+              }
+              const publicVerdict = JSON.parse(
+                evidenceContent.get("evidence/review-verdict.json").toString("utf8")
+              );
+              const verdictFields = [
+                "gateId",
+                "taskId",
+                "pullRequest",
+                "fixedCommitSha",
+                "implementationLeaseId",
+                "reviewLeaseId",
+                "implementerSession",
+                "reviewerSession",
+                "verdict",
+                "recommendation",
+                "requiredTestCount",
+                "passedTestCount",
+                "skippedTestCount",
+                "requiredRegressionIds",
+                "executedRegressionIds",
+                "testStartedAt",
+                "testedAt",
+              ];
+              for (const field of verdictFields) {
+                if (
+                  JSON.stringify(publicVerdict[field]) !==
+                  JSON.stringify(attestation[field])
+                ) {
+                  throw new Error(`Public review verdict mismatch: ${field}`);
+                }
+              }
+              if (Object.hasOwn(publicVerdict, "evidencePath")) {
+                throw new Error("Public review verdict must not expose a local evidence path");
+              }
+
+              const leaseProof = JSON.parse(
+                evidenceContent.get("evidence/lease-proof.json").toString("utf8")
+              );
+              const implementationLease = leaseProof.implementation;
+              const reviewLease = leaseProof.review;
+              if (
+                leaseProof.schemaVersion !== 1 ||
+                implementationLease?.leaseId !== attestation.implementationLeaseId ||
+                implementationLease?.taskId !== attestation.taskId ||
+                implementationLease?.role !== "implementer" ||
+                implementationLease?.outcome !== "SELF_TESTED" ||
+                implementationLease?.agentSession !== attestation.implementerSession ||
+                implementationLease?.fixedCommitSha !== attestation.fixedCommitSha ||
+                implementationLease?.releasedBy !== "ceo" ||
+                reviewLease?.leaseId !== attestation.reviewLeaseId ||
+                reviewLease?.implementationLeaseId !== attestation.implementationLeaseId ||
+                reviewLease?.taskId !== attestation.taskId ||
+                reviewLease?.role !== "reviewer" ||
+                reviewLease?.outcome !== "PASS" ||
+                reviewLease?.agentSession !== attestation.reviewerSession ||
+                reviewLease?.fixedCommitSha !== attestation.fixedCommitSha ||
+                reviewLease?.startedAt !== attestation.reviewLeaseStartedAt ||
+                reviewLease?.expiresAt !== attestation.reviewLeaseExpiresAt ||
+                reviewLease?.releasedBy !== "ceo" ||
+                Number.isNaN(Date.parse(implementationLease?.releasedAt)) ||
+                Number.isNaN(Date.parse(reviewLease?.releasedAt)) ||
+                Date.parse(implementationLease.releasedAt) > Date.parse(reviewLease.startedAt) ||
+                Date.parse(reviewLease.releasedAt) < Date.parse(attestation.testedAt)
+              ) {
+                throw new Error("Lease proof does not match the attestation");
+              }
+
+              const regressionResponse = await github.rest.repos.getContent({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                path: "harness/regression_manifest.md",
+                ref: attestation.fixedCommitSha,
+              });
+              if (Array.isArray(regressionResponse.data)) {
+                throw new Error("Regression manifest path is not a file");
+              }
+              const regressionManifest = Buffer.from(
+                regressionResponse.data.content.replace(/\n/g, ""),
+                "base64"
+              ).toString("utf8");
+              const requiredFromManifest = [
+                ...regressionManifest.matchAll(
+                  /^\|\s*(REG-[A-Z0-9-]+)\s*\|\s*REQUIRED\s*\|/gm
+                ),
+              ].map((match) => match[1]).sort();
+              const requiredFromAttestation = [
+                ...new Set(attestation.requiredRegressionIds),
+              ].sort();
+              const executedFromAttestation = [
+                ...new Set(attestation.executedRegressionIds),
+              ].sort();
+              if (
+                requiredFromAttestation.length !==
+                  attestation.requiredRegressionIds.length ||
+                executedFromAttestation.length !==
+                  attestation.executedRegressionIds.length ||
+                JSON.stringify(requiredFromManifest) !==
+                  JSON.stringify(requiredFromAttestation) ||
+                JSON.stringify(requiredFromManifest) !==
+                  JSON.stringify(executedFromAttestation)
+              ) {
+                throw new Error("Regression IDs do not match the fixed-SHA manifest");
+              }
+              let governanceApproved = false;
+              if (
+                pr.labels.some((label) => label.name === "governance:approved")
+              ) {
+                const events = await github.paginate(github.rest.issues.listEvents, {
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: pr.number,
+                  per_page: 100,
+                });
+                const ownerApproval = events
+                  .filter(
+                    (event) =>
+                      event.event === "labeled" &&
+                      event.label?.name === "governance:approved"
+                  )
+                  .at(-1);
+                governanceApproved =
+                  ownerApproval?.actor?.login?.toLowerCase() ===
+                  process.env.BOARD_REVIEWER_LOGIN.toLowerCase();
+                if (!governanceApproved) {
+                  throw new Error(
+                    "governance:approved was not applied by the board owner"
+                  );
+                }
+              }
+              core.setOutput("found", "true");
+              core.setOutput("pull_request", String(pr.number));
+              core.setOutput("fixed_sha", attestation.fixedCommitSha);
+              core.setOutput("gate_id", attestation.gateId);
+              core.setOutput("evidence_sha256", attestation.evidenceSha256);
+              core.setOutput("evidence_commit_sha", attestation.evidenceCommitSha);
+              core.setOutput("evidence_branch", attestation.evidenceBranch);
+              core.setOutput("base_sha", pr.base.sha);
+              core.setOutput(
+                "governance_approved",
+                governanceApproved ? "true" : "false"
+              );
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                name: "review:awaiting-board",
+              });
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: ["review:board-pending"],
+              });
+              await core.summary
+                .addHeading(`Independent review ${attestation.gateId}`)
+                .addTable([
+                  [{ data: "PR", header: true }, `#${pr.number}`],
+                  [{ data: "Fixed SHA", header: true }, attestation.fixedCommitSha],
+                  [{ data: "Tests", header: true }, `${passed}/${required}, skipped ${skipped}`],
+                  [{ data: "Evidence SHA-256", header: true }, attestation.evidenceSha256],
+                  [
+                    { data: "Evidence commit", header: true },
+                    `[${attestation.evidenceCommitSha}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/commit/${attestation.evidenceCommitSha})`,
+                  ],
+                  [{ data: "Evidence files", header: true }, `${evidenceFileCount} files, ${verifiedBytes} bytes`],
+                  [{ data: "Reviewer session", header: true }, attestation.reviewerSession],
+                  [{ data: "Test interval", header: true }, `${attestation.testStartedAt} — ${attestation.testedAt}`],
+                  [{ data: "Review lease", header: true }, `${attestation.reviewLeaseStartedAt} — ${attestation.reviewLeaseExpiresAt}`],
+                ])
+                .write();
+            } catch (error) {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                name: "review:awaiting-board",
+              }).catch(() => undefined);
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                labels: ["review:invalid"],
+              }).catch(() => undefined);
+              throw error;
+            }
+
+  verify:
+    name: review/trusted-recheck
+    needs: prepare
+    if: ${{ needs.prepare.outputs.found == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted default-branch harness
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+          path: trusted
+          persist-credentials: false
+      - name: Check out reviewed fixed SHA
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ needs.prepare.outputs.fixed_sha }}
+          path: product
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24.15.0
+          package-manager-cache: false
+      - uses: actions/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548 # v6.1.0
+        with:
+          python-version: 3.12.14
+      - name: Pin npm and check runtime
+        run: |
+          npm install --global npm@11.12.1
+          test "$(node --version)" = "v24.15.0"
+          test "$(npm --version)" = "11.12.1"
+      - name: Enforce immutable action references
+        working-directory: trusted
+        run: node harness/scripts/assert-action-pins.mjs ../product
+      - name: Detect product package
+        id: project
+        run: |
+          test -f product/package.json
+          echo "has_package=true" >> "$GITHUB_OUTPUT"
+      - name: Re-run trusted governance boundary
+        id: governance
+        env:
+          BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          FIXED_SHA: ${{ needs.prepare.outputs.fixed_sha }}
+          GOVERNANCE_APPROVED: ${{ needs.prepare.outputs.governance_approved }}
+          HAS_PACKAGE: ${{ steps.project.outputs.has_package }}
+        working-directory: trusted
+        run: |
+          git fetch --no-tags origin "$FIXED_SHA"
+          arguments=("$BASE_SHA" "$FIXED_SHA")
+          if [ "$GOVERNANCE_APPROVED" = "true" ]; then
+            arguments+=("--governance-approved")
+          fi
+          if [ "$HAS_PACKAGE" != "true" ]; then
+            arguments+=("--bootstrap-only")
+          fi
+          node harness/scripts/assert-harness-diff.mjs "${arguments[@]}"
+      - name: Re-check PR and evidence binding
+        id: binding
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const prNumber = Number("${{ needs.prepare.outputs.pull_request }}");
+            const fixedSha = "${{ needs.prepare.outputs.fixed_sha }}";
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            const { data: repository } = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const { data: defaultBranch } = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: repository.default_branch,
+            });
+            const comparison = await github.request(
+              "GET /repos/{owner}/{repo}/compare/{basehead}",
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                basehead: `${defaultBranch.commit.sha}...${fixedSha}`,
+              }
+            );
+            if (
+              pr.head.sha !== fixedSha ||
+              pr.base.ref !== repository.default_branch ||
+              pr.base.sha !== defaultBranch.commit.sha ||
+              !["ahead", "identical"].includes(comparison.data.status)
+            ) {
+              core.setFailed(
+                "PR no longer targets or contains the current default branch"
+              );
+              return;
+            }
+            const evidenceRef = await github.rest.git.getRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: "heads/${{ needs.prepare.outputs.evidence_branch }}",
+            });
+            if (
+              evidenceRef.data.object.sha !==
+              "${{ needs.prepare.outputs.evidence_commit_sha }}"
+            ) {
+              core.setFailed("Evidence branch changed while waiting for board approval");
+              return;
+            }
+      - name: Install product dependencies
+        id: install
+        if: ${{ steps.project.outputs.has_package == 'true' }}
+        run: >-
+          node trusted/harness/scripts/ci-quality.mjs --product-root product --gate install
+          --fixed-sha "${{ needs.prepare.outputs.fixed_sha }}"
+          --output artifacts/ci/trusted-recheck/install
+      - name: Install clean Linux browser and OS dependencies
+        if: ${{ steps.project.outputs.has_package == 'true' && steps.install.outcome == 'success' }}
+        run: >-
+          node trusted/harness/scripts/ci-quality.mjs --product-root product --gate browsers
+          --fixed-sha "${{ needs.prepare.outputs.fixed_sha }}"
+          --output artifacts/ci/trusted-recheck/browsers
+      - name: Re-run static, build, and migration gates
+        id: static
+        if: ${{ steps.project.outputs.has_package == 'true' && steps.install.outcome == 'success' }}
+        run: >-
+          node trusted/harness/scripts/ci-quality.mjs --product-root product --gate static
+          --fixed-sha "${{ needs.prepare.outputs.fixed_sha }}"
+          --output artifacts/ci/trusted-recheck/static
+      - name: Re-run unit and integration gates
+        id: unit
+        if: ${{ steps.project.outputs.has_package == 'true' && steps.install.outcome == 'success' }}
+        run: >-
+          node trusted/harness/scripts/ci-quality.mjs --product-root product --gate unit
+          --fixed-sha "${{ needs.prepare.outputs.fixed_sha }}"
+          --output artifacts/ci/trusted-recheck/unit
+      - name: Re-run Chromium E2E gate
+        id: chromium
+        if: ${{ steps.project.outputs.has_package == 'true' && steps.install.outcome == 'success' }}
+        run: >-
+          node trusted/harness/scripts/ci-quality.mjs --product-root product --gate e2e-chromium
+          --fixed-sha "${{ needs.prepare.outputs.fixed_sha }}"
+          --output artifacts/ci/trusted-recheck/e2e-chromium
+      - name: Re-run WebKit mobile E2E gate
+        id: webkit
+        if: ${{ steps.project.outputs.has_package == 'true' && steps.install.outcome == 'success' }}
+        run: >-
+          node trusted/harness/scripts/ci-quality.mjs --product-root product --gate e2e-webkit-mobile
+          --fixed-sha "${{ needs.prepare.outputs.fixed_sha }}"
+          --output artifacts/ci/trusted-recheck/e2e-webkit-mobile
+      - name: Re-run accessibility gate
+        id: accessibility
+        if: ${{ steps.project.outputs.has_package == 'true' && steps.install.outcome == 'success' }}
+        run: >-
+          node trusted/harness/scripts/ci-quality.mjs --product-root product --gate accessibility
+          --fixed-sha "${{ needs.prepare.outputs.fixed_sha }}"
+          --output artifacts/ci/trusted-recheck/accessibility
+      - name: Check combined upload size without truncating evidence
+        id: budget
+        if: ${{ always() }}
+        run: node trusted/harness/scripts/ci-upload-budget.mjs artifacts/ci/trusted-recheck
+      - name: Upload bounded trusted recheck evidence including failures
+        if: ${{ always() && steps.budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: trusted-recheck-${{ needs.prepare.outputs.fixed_sha }}
+          path: artifacts/ci/trusted-recheck/
+          if-no-files-found: error
+          retention-days: 1
+
+  board:
+    name: review/board-gate
+    needs: [prepare, verify]
+    if: ${{ needs.prepare.outputs.found == 'true' && needs.verify.result == 'success' }}
+    environment:
+      name: board-review
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Final fixed-SHA and evidence binding check
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const prNumber = Number("${{ needs.prepare.outputs.pull_request }}");
+            const fixedSha = "${{ needs.prepare.outputs.fixed_sha }}";
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+            const { data: repository } = await github.rest.repos.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+            const { data: defaultBranch } = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: repository.default_branch,
+            });
+            const comparison = await github.request(
+              "GET /repos/{owner}/{repo}/compare/{basehead}",
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                basehead: `${defaultBranch.commit.sha}...${fixedSha}`,
+              }
+            );
+            if (
+              pr.head.sha !== fixedSha ||
+              pr.base.ref !== repository.default_branch ||
+              pr.base.sha !== defaultBranch.commit.sha ||
+              !["ahead", "identical"].includes(comparison.data.status)
+            ) {
+              core.setFailed(
+                "PR no longer targets or contains the current default branch"
+              );
+              return;
+            }
+            const evidenceRef = await github.rest.git.getRef({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              ref: "heads/${{ needs.prepare.outputs.evidence_branch }}",
+            });
+            if (
+              evidenceRef.data.object.sha !==
+              "${{ needs.prepare.outputs.evidence_commit_sha }}"
+            ) {
+              core.setFailed("Evidence branch changed after trusted verification");
+            }
+      - name: Create dedicated Gatekeeper App token
+        id: gatekeeper
+        uses: actions/create-github-app-token@67018539274d69449ef7c02e8e71183d1719ab42 # v2.1.4
+        with:
+          app-id: ${{ vars.GATEKEEPER_APP_ID }}
+          private-key: ${{ secrets.GATEKEEPER_APP_PRIVATE_KEY }}
+      - name: Publish seven Gatekeeper App statuses
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          github-token: ${{ steps.gatekeeper.outputs.token }}
+          script: |
+            const fixedSha = "${{ needs.prepare.outputs.fixed_sha }}";
+            const contexts = [
+              "governance/protected-files",
+              "quality/static",
+              "quality/unit",
+              "quality/e2e-chromium",
+              "quality/e2e-webkit-mobile",
+              "quality/accessibility",
+              "review/independent",
+            ];
+            const targetUrl =
+              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            for (const statusContext of contexts) {
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha: fixedSha,
+                state: "success",
+                context: statusContext,
+                description: `Gatekeeper approved ${{ needs.prepare.outputs.gate_id }}`,
+                target_url: targetUrl,
+              });
+            }
+      - name: Mark review approved
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const prNumber = Number("${{ needs.prepare.outputs.pull_request }}");
+            await github.rest.issues.removeLabel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              name: "review:board-pending",
+            });
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              labels: ["review:approved"],
+            });

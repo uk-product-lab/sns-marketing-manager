@@ -45,14 +45,14 @@ v4 artifact の不変性・API metadata・元 run の信頼済み main コード
 
 `node --test harness/tests/board-actor-probe.test.mjs` は実処理に injected synthetic API/clock を通す。単独 validator の正常値だけではなく、dispatcher/receiver/protected/negative の runtime entrypoint、実 ZIP writer の stored/deflate/stream descriptor、HTTP不明応答、偽 provenance、Environment変更、公開境界を検証する。workflow の embedded JS も構文解析・境界 entrypoint の mock 実行を行う。実 Linux/実 actor/本人操作の試験は今回未実施。
 
-自己検証と独立監査は別固定 SHA・scopeで混同しない。TASK-0006 は unchanged `harness-local-v1` の12 IDをすべて要求し、全既存 `harness/tests/*.test.mjs` の成功・skip0を含む。旧 QA/lease/PR例外を流用しない。必須検証失敗時は原物を保存し、新 SHA で通常の全必須検証から差戻す。CEOだけが正規 validator と clean固定 SHAを確認してleaseを解放する。
+自己検証と独立監査は同一の固定 candidate SHA を対象とし、gate/session/worktree/lease と検証 scope を分離する。旧 SHA の自己検証・監査結果を新 SHA に代用しない。TASK-0006 は unchanged `harness-local-v1` の12 IDをすべて要求し、全既存 `harness/tests/*.test.mjs` の成功・skip0を含む。旧 QA/lease/PR例外を流用しない。必須検証失敗時は原物を保存し、新 SHA で通常の全必須検証から差戻す。CEOだけが正規 validator と clean固定 SHAを確認してleaseを解放する。
 
 | 受入 | 主な LOCAL 根拠 |
 |---|---|
-| PROBE-001/002 | workflow YAML/embedded JS、Action pins、boundary runtime、権限/checkout/固定API/未知入力 fixture |
-| PROBE-003/004 | 一回POST/不明応答、実受信ID照合、元/子run/時刻/SHA/所属、READ準備待ち/重複/再帰/attempt fixture |
-| PROBE-005/006 | 保護前と保護後 Environment/履歴 fixture、本人直接negativeの別結線/必ず失敗 |
-| PROBE-007/008 | marker境界/公開・秘密検査、digest/ZIP/CRC/descriptor/過大/余分file/取得/合算budget fixture |
+| PROBE-001 / PROBE-002 | workflow YAML/embedded JS、Action pins、boundary runtime、権限/checkout/固定API/未知入力 fixture |
+| PROBE-003 / PROBE-004 | 一回POST/不明応答、実受信ID照合、元/子run/時刻/SHA/所属、READ準備待ち/重複/再帰/attempt fixture |
+| PROBE-005 / PROBE-006 | 保護前と保護後 Environment/履歴 fixture、本人直接negativeの別結線/必ず失敗 |
+| PROBE-007 / PROBE-008 | marker境界/公開・秘密検査、digest/ZIP/CRC/descriptor/過大/余分file/取得/合算budget fixture |
 | PROBE-009 | 固定SHA/tree/base/差分hash、既存90file不変、全必須12check/既存test/skip0、別lease/session監査 |
 
 ローカル証跡の実値・開始/終了時刻・ログ・件数は worktree 外の共有 stateRoot に保存し、この手順に未実行結果を記入しない。製品回帰の REQUIRED 昇格はない。TASK-MVP-01 は Repository Gate/採用設計/READY/新leaseまで解放しない。

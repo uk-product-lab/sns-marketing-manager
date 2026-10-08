@@ -125,9 +125,14 @@ async function duplicateGuard(api, snapshot, inputs) {
     if (runs.length >= total) break;
     requireCondition(data.workflow_runs.length === 100, "RUN_LIST_INCOMPLETE", "BLOCKED");
   }
+  requireCondition(runs.every((item) => item && positiveId(item.id) && typeof item.display_title === "string"), "RUN_LIST_INVALID", "BLOCKED");
   requireCondition(runs.length === total && new Set(runs.map((item) => item.id)).size === runs.length, "RUN_LIST_INCOMPLETE", "BLOCKED");
-  const same = runs.filter((item) => item.display_title === runTitle(inputs.mode, inputs.probe_id));
-  requireCondition(same.length === 1 && same[0].id === snapshot.run.id, "DUPLICATE_PROBE_REJECTED");
+  // One UUID owns either one negative run or one dispatch/current-receiver pair.
+  // Include unknown phases too: a malformed prior phase cannot release its UUID.
+  const same = runs.filter((item) => item.display_title.startsWith("board-actor-probe:") && item.display_title.endsWith(`:${inputs.probe_id}`));
+  const allowed = new Map([[snapshot.run.id, runTitle(inputs.mode, inputs.probe_id)]]);
+  if (inputs.mode === "receive") allowed.set(Number(inputs.source_run_id), runTitle("dispatch", inputs.probe_id));
+  requireCondition(same.length === allowed.size && same.every((item) => allowed.get(item.id) === item.display_title), "DUPLICATE_PROBE_REJECTED");
 }
 
 async function inspect(api, context, inputs, now) {
@@ -207,9 +212,10 @@ export function parseReceiptArchive(buffer, digest) {
     const flags = buffer.readUInt16LE(central + 8), method = buffer.readUInt16LE(central + 10), crc = buffer.readUInt32LE(central + 16);
     const compressed = buffer.readUInt32LE(central + 20), size = buffer.readUInt32LE(central + 24), nameBytes = buffer.readUInt16LE(central + 28);
     const extraBytes = buffer.readUInt16LE(central + 30), commentBytes = buffer.readUInt16LE(central + 32), offset = buffer.readUInt32LE(central + 42);
+    const attributes = buffer.readUInt32LE(central + 38), unixType = attributes >>> 16 & 0xf000;
     requireCondition([0, 8].includes(method) && (flags & ~0x808) === 0 && size > 0 && size <= RECEIPT_BYTES && compressed > 0 && compressed <= ARCHIVE_BYTES &&
       centralBytes === 46 + nameBytes + extraBytes + commentBytes && buffer.readUInt16LE(central + 34) === 0 && offset === 0 &&
-      (buffer.readUInt32LE(central + 38) >>> 16 & 0xf000) !== 0xa000 &&
+      (attributes & 0x10) === 0 && [0, 0x8000].includes(unixType) &&
       buffer.subarray(central + 46, central + 46 + nameBytes).toString("utf8") === "dispatch-receipt.json", "ZIP_ENTRY_INVALID");
     requireCondition(buffer.readUInt32LE(offset) === 0x04034b50 && buffer.readUInt16LE(offset + 6) === flags &&
       buffer.readUInt16LE(offset + 8) === method && buffer.readUInt16LE(offset + 26) === nameBytes, "ZIP_LOCAL_INVALID");

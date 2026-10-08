@@ -37,7 +37,7 @@ function fixture(mode = "dispatch") {
       deployment_branch_policy: { protected_branches: false, custom_branch_policies: true } },
     policies: { total_count: 1, branch_policies: [{ id: 901, name: "main", type: "branch" }] },
     source: run(mode === "direct-negative" ? mode : "dispatch", SOURCE), receiver: run("receive", RECEIVER), artifacts: [],
-    list: null, archive: null, history: [{ state: "approved", environments: [{ id: 900, name: probe.ENVIRONMENT }], user: clone(actor) }],
+    list: null, receiverCreated: mode === "receive", archive: null, history: [{ state: "approved", environments: [{ id: 900, name: probe.ENVIRONMENT }], user: clone(actor) }],
     dispatchResponse: { status: 200, data: { workflow_run_id: RECEIVER, run_url: `https://api.github.com/repos/${probe.REPOSITORY}/actions/runs/${RECEIVER}`, html_url: `https://github.com/${probe.REPOSITORY}/actions/runs/${RECEIVER}` } },
     readStatus: 200, override: null, now: NOW,
   };
@@ -47,15 +47,15 @@ function fixture(mode = "dispatch") {
       assert.equal(params.headers["X-GitHub-Api-Version"], probe.API_VERSION);
       assert.equal(params.owner + "/" + params.repo, probe.REPOSITORY);
       if (state.override) { const value = state.override(route, params); if (value !== undefined) return value; }
-      if (route.startsWith("POST ")) return state.dispatchResponse;
+      if (route.startsWith("POST ")) { state.receiverCreated = true; return state.dispatchResponse; }
       let data;
       if (route === "GET /repos/{owner}/{repo}") data = state.repository;
       else if (route.endsWith("/branches/{branch}")) data = state.branch;
       else if (route.endsWith("/actions/workflows/{workflow_id}")) data = state.workflow;
       else if (route.endsWith("/environments/{environment_name}")) data = state.environment;
       else if (route.endsWith("/deployment-branch-policies")) data = state.policies;
-      else if (route.endsWith("/actions/workflows/{workflow_id}/runs")) data = { total_count: (state.list ?? [state.source, state.receiver]).length, workflow_runs: state.list ?? [state.source, state.receiver] };
-      else if (route.endsWith("/actions/runs/{run_id}")) data = params.run_id === SOURCE ? state.source : state.receiver;
+      else if (route.endsWith("/actions/workflows/{workflow_id}/runs")) { const runs = state.list ?? [state.source, ...(state.receiverCreated ? [state.receiver] : [])]; data = { total_count: runs.length, workflow_runs: runs }; }
+      else if (route.endsWith("/actions/runs/{run_id}")) { if (params.run_id !== SOURCE) assert.equal(state.receiverCreated, true); data = params.run_id === SOURCE ? state.source : state.receiver; }
       else if (route.endsWith("/artifacts")) data = { total_count: state.artifacts.length, artifacts: state.artifacts };
       else if (route.endsWith("/approvals")) data = state.history;
       else throw new Error("Unknown synthetic route");
@@ -68,7 +68,7 @@ function fixture(mode = "dispatch") {
 
 // Python's standard ZIP writer emits real stored/deflated entries; a non-seekable
 // sink emits data descriptors just as the upload Action's streaming archiver does.
-function zip(content, { name = "dispatch-receipt.json", compressed = false, stream = false, extra = false } = {}) {
+function zip(content, { name = "dispatch-receipt.json", compressed = false, stream = false, extra = false, attributes = null, creator = 3 } = {}) {
   const program = String.raw`
 import io, sys, zipfile
 class Sink(io.BytesIO):
@@ -76,11 +76,17 @@ class Sink(io.BytesIO):
     def tell(self): raise OSError("nonseekable")
 target = Sink() if sys.argv[3] == 'stream' else io.BytesIO()
 with zipfile.ZipFile(target, 'w', compression=zipfile.ZIP_DEFLATED if sys.argv[2] == 'deflated' else zipfile.ZIP_STORED) as out:
-    out.writestr(sys.argv[1], sys.stdin.buffer.read())
+    name = sys.argv[1]
+    if sys.argv[5]:
+        name = zipfile.ZipInfo(name)
+        name.create_system = int(sys.argv[6])
+        name.external_attr = int(sys.argv[5])
+        name.compress_type = out.compression
+    out.writestr(name, sys.stdin.buffer.read())
     if sys.argv[4] == 'extra': out.writestr('unexpected.json', '{}')
 sys.stdout.buffer.write(target.getvalue())
 `;
-  return execFileSync("python3", ["-I", "-c", program, name, compressed ? "deflated" : "stored", stream ? "stream" : "seekable", extra ? "extra" : "single"], { input: content, maxBuffer: 1024 * 1024 });
+  return execFileSync("python3", ["-I", "-c", program, name, compressed ? "deflated" : "stored", stream ? "stream" : "seekable", extra ? "extra" : "single", attributes === null ? "" : String(attributes), String(creator)], { input: content, maxBuffer: 1024 * 1024 });
 }
 function packageReceipt(f, receipt) {
   f.state.archive = zip(JSON.stringify(receipt, null, 2) + "\n", { stream: true });
@@ -97,7 +103,8 @@ async function readyFixture() {
 const rejectsCode = (promise, code) => assert.rejects(promise, (error) => error instanceof probe.ProbeError && (!code || error.code === code));
 
 test("PROBE-002/003 dispatcher executes one fixed main POST and captures actual source/receiver identity", async () => {
-  const f = fixture(), result = await probe.dispatchProbe(f.api, f.context, f.inputs, f.options);
+  const f = fixture(); assert.equal(f.state.receiverCreated, false);
+  const result = await probe.dispatchProbe(f.api, f.context, f.inputs, f.options); assert.equal(f.state.receiverCreated, true);
   const writes = f.calls.filter((item) => item.route?.startsWith("POST "));
   assert.equal(writes.length, 1); assert.equal(writes[0].params.ref, "main"); assert.equal(writes[0].params.workflow_id, "board-actor-probe.yml");
   assert.equal(writes[0].params.inputs.mode, "receive"); assert.equal(result.receipt.receiver.id, RECEIVER);
@@ -177,9 +184,57 @@ test("PROBE-004 duplicate identity across differentSHA is still rejected", async
   const f = fixture(); f.state.list = [f.state.source, { ...f.state.source, id: 102, head_sha: OTHER_SHA }];
   await rejectsCode(probe.dispatchProbe(f.api, f.context, f.inputs, f.options), "DUPLICATE_PROBE_REJECTED");
 });
+for (const [mode, priorMode, status, priorSha] of [
+  ["dispatch", "direct-negative", "success", SHA],
+  ["dispatch", "direct-negative", "failure", OTHER_SHA],
+  ["dispatch", "receive", "cancelled", SHA],
+  ["dispatch", "unknown:phase", "failure", SHA],
+  ["direct-negative", "dispatch", "success", SHA],
+  ["direct-negative", "receive", "failure", OTHER_SHA],
+  ["direct-negative", "unknown:phase", "in_progress", SHA],
+  ["receive", "direct-negative", "success", SHA],
+  ["receive", "dispatch", "failure", OTHER_SHA],
+  ["receive", "unknown:phase", "cancelled", SHA],
+]) test(`PROBE-004/009 runtime rejects UUID reuse ${priorMode}->${mode}/${status}/${priorSha === SHA ? "sameSHA" : "otherSHA"}`, async () => {
+  const f = mode === "receive" ? await readyFixture() : fixture(mode), previous = run("direct-negative", 102);
+  previous.display_title = `board-actor-probe:${priorMode}:${PROBE_ID}`; previous.head_sha = priorSha;
+  previous.status = status === "in_progress" ? status : "completed"; previous.conclusion = status === "in_progress" ? null : status;
+  f.state.list = [f.state.source, ...(mode === "receive" ? [f.state.receiver] : []), previous];
+  const root = await mkdtemp(join(tmpdir(), "board-probe-uuid-replay-")), stage = mode === "dispatch" ? "dispatch" : "guard";
+  await rejectsCode(probe.runWorkflowStage(stage, { ...f, ...f.options, root }), "DUPLICATE_PROBE_REJECTED");
+  const failure = JSON.parse(await readFile(join(root, "observation", "result.json"), "utf8"));
+  assert.equal(failure.positiveMarker, false); assert.equal(failure.code, "DUPLICATE_PROBE_REJECTED");
+  assert.equal(f.calls.some((item) => item.route?.startsWith("POST ") || item.download), false);
+  assert.deepEqual(await readdir(root), ["observation"]); // No bound receipt or positive marker.
+});
+for (const mode of ["dispatch", "receive", "direct-negative"]) test("PROBE-004 legitimate lifecycle ignores unrelated UUID: " + mode, async () => {
+  const f = mode === "receive" ? await readyFixture() : fixture(mode), unrelated = run("direct-negative", 102);
+  unrelated.display_title = "board-actor-probe:direct-negative:00000000-0000-4000-8000-000000000007";
+  f.state.list = [f.state.source, ...(mode === "receive" ? [f.state.receiver] : []), unrelated];
+  if (mode === "dispatch") assert.equal((await probe.dispatchProbe(f.api, f.context, f.inputs, f.options)).receipt.receiver.id, RECEIVER);
+  else if (mode === "receive") assert.equal((await probe.receiveProbe(f.api, f.context, f.inputs, f.options)).source.id, SOURCE);
+  else assert.equal((await probe.directNegativePreflight(f.api, f.context, f.inputs, f.options)).positiveMarker, false);
+});
+for (const [name, change] of [
+  ["wrong claimed parent", (f) => { f.inputs.source_run_id = "102"; }],
+  ["extra current UUID child", (f) => { f.state.list = [f.state.source, f.state.receiver, run("receive", 102)]; }],
+]) test("PROBE-004 receiver rejects lifecycle " + name, async () => {
+  const f = await readyFixture(); change(f);
+  await rejectsCode(probe.receiveProbe(f.api, f.context, f.inputs, f.options), "DUPLICATE_PROBE_REJECTED");
+  assert.equal(f.calls.some((item) => item.route?.startsWith("POST ") || item.download), false);
+});
+test("PROBE-004 protected final READ rejects cross-mode reuse observed during approval lookup", async () => {
+  const f = await readyFixture(), guard = await probe.receiveProbe(f.api, f.context, f.inputs, f.options);
+  f.state.override = (route) => { if (route.endsWith("/approvals")) f.state.list = [f.state.source, f.state.receiver, run("direct-negative", 102)]; };
+  const root = await mkdtemp(join(tmpdir(), "board-probe-last-uuid-"));
+  await rejectsCode(probe.runWorkflowStage("protected", { ...f, ...f.options, root, expectedEnvironment: guard.snapshot.environment }), "DUPLICATE_PROBE_REJECTED");
+  const failure = JSON.parse(await readFile(join(root, "observation", "result.json"), "utf8"));
+  assert.equal(failure.positiveMarker, false); assert.equal(failure.synthetic, undefined);
+});
 for (const malformed of [
   { total_count: 1001, workflow_runs: [] }, { total_count: 3, workflow_runs: [run("dispatch", SOURCE)] },
   { total_count: 2, workflow_runs: [run("dispatch", SOURCE), run("dispatch", SOURCE)] },
+  { total_count: 2, workflow_runs: [run("dispatch", SOURCE), { id: 102 }] },
 ]) test("PROBE-004 malformed/incomplete runpagination is BLOCKED", async () => {
   const f = fixture(); f.state.override = (route) => route.endsWith("/workflows/{workflow_id}/runs") ? { status: 200, data: malformed } : undefined;
   await assert.rejects(probe.dispatchProbe(f.api, f.context, f.inputs, f.options), (error) => error.result === "BLOCKED");
@@ -286,6 +341,35 @@ test("PROBE-006 direct human negative path is entirely separate and can never pr
 
 for (const compressed of [false, true]) for (const stream of [false, true]) test("PROBE-008 real standard-library ZIP interop stored/deflate with/without descriptor: " + [compressed, stream], () => {
   const text = JSON.stringify({ synthetic: true }, null, 2) + "\n", archive = zip(text, { compressed, stream });
+  assert.deepEqual(probe.parseReceiptArchive(archive, digest(archive)), { synthetic: true });
+});
+const unixAttributes = (type, dos = 0) => (((type | 0o644) << 16) | dos) >>> 0;
+const nonfileAttributes = [
+  ["Unix directory without trailing slash", unixAttributes(0x4000), 3],
+  ["DOS directory without trailing slash", 0x10, 0],
+  ["Unix regular with DOS directory flag", unixAttributes(0x8000, 0x10), 3],
+  ["Unix symlink", unixAttributes(0xa000), 3],
+  ["Unix FIFO", unixAttributes(0x1000), 3],
+];
+for (const [name, attributes, creator] of nonfileAttributes) {
+  test("PROBE-008 real ZIP writer rejects nonfile attributes: " + name, () => {
+    const archive = zip(JSON.stringify({ synthetic: true }, null, 2) + "\n", { attributes, creator, compressed: true, stream: true });
+    assert.throws(() => probe.parseReceiptArchive(archive, digest(archive)), (error) => error instanceof probe.ProbeError && error.code === "ZIP_ENTRY_INVALID");
+  });
+  test("PROBE-008/009 runtime receiver rejects correctly digested nonfile receipt: " + name, async () => {
+    const f = await readyFixture();
+    f.state.archive = zip(JSON.stringify(f.receipt, null, 2) + "\n", { attributes, creator, compressed: true, stream: true });
+    f.state.artifacts[0].digest = digest(f.state.archive); f.state.artifacts[0].size_in_bytes = f.state.archive.length;
+    const root = await mkdtemp(join(tmpdir(), "board-probe-nonfile-receipt-"));
+    await rejectsCode(probe.runWorkflowStage("guard", { ...f, ...f.options, root }), "ZIP_ENTRY_INVALID");
+    const failure = JSON.parse(await readFile(join(root, "observation", "result.json"), "utf8"));
+    assert.equal(failure.positiveMarker, false); assert.equal(failure.code, "ZIP_ENTRY_INVALID");
+    assert.equal(f.calls.filter((item) => item.download).length, 1); assert.equal(f.calls.some((item) => item.route?.startsWith("POST ")), false);
+    assert.deepEqual(await readdir(root), ["observation"]);
+  });
+}
+for (const [name, attributes, creator] of [["Unix regular", unixAttributes(0x8000), 3], ["DOS archive regular", 0x20, 0]]) test("PROBE-008 regular attributes retain ZIP writer compatibility: " + name, () => {
+  const archive = zip(JSON.stringify({ synthetic: true }, null, 2) + "\n", { attributes, creator, compressed: true, stream: true });
   assert.deepEqual(probe.parseReceiptArchive(archive, digest(archive)), { synthetic: true });
 });
 for (const [name, options, content] of [

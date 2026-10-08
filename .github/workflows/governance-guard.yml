@@ -1,0 +1,96 @@
+name: Governance guard
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  statuses: write
+
+env:
+  BOARD_REVIEWER_LOGIN: ukyo-0001
+
+jobs:
+  protected-files:
+    name: governance/evaluator
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out trusted default branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - name: Fetch PR objects without executing them
+        run: git fetch --no-tags origin "${{ github.event.pull_request.head.sha }}"
+      - name: Enforce immutable action references
+        run: >-
+          node harness/scripts/assert-action-pins.mjs .
+          --git-ref "${{ github.event.pull_request.head.sha }}"
+      - name: Enforce protected harness boundary
+        id: guard
+        continue-on-error: true
+        env:
+          GOVERNANCE_APPROVED: ${{ contains(github.event.pull_request.labels.*.name, 'governance:approved') }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$GOVERNANCE_APPROVED" = "true" ]; then
+            node harness/scripts/assert-harness-diff.mjs "$BASE_SHA" "$HEAD_SHA" --governance-approved
+          else
+            node harness/scripts/assert-harness-diff.mjs "$BASE_SHA" "$HEAD_SHA"
+          fi
+      - name: Verify governance label was applied by board reviewer
+        id: approval
+        continue-on-error: true
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const approved = context.payload.pull_request.labels
+              .some((label) => label.name === "governance:approved");
+            if (!approved) {
+              core.info("No governance approval label on this PR");
+              return;
+            }
+            const events = await github.paginate(github.rest.issues.listEvents, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              per_page: 100,
+            });
+            const approvals = events.filter(
+              (event) =>
+                event.event === "labeled" &&
+                event.label?.name === "governance:approved",
+            );
+            const actor = approvals.at(-1)?.actor?.login;
+            if (
+              actor?.toLowerCase() !==
+              process.env.BOARD_REVIEWER_LOGIN.toLowerCase()
+            ) {
+              core.setFailed("governance:approved must be applied by the board reviewer");
+            }
+      - name: Publish trusted status on PR head
+        if: ${{ always() }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const success =
+              "${{ steps.guard.outcome }}" === "success" &&
+              "${{ steps.approval.outcome }}" === "success";
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: context.payload.pull_request.head.sha,
+              state: success ? "success" : "failure",
+              context: "ci/governance",
+              description: success
+                ? "Protected harness boundary passed"
+                : "Protected harness boundary failed",
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
+            });
+      - name: Fail evaluator when guard failed
+        if: ${{ steps.guard.outcome != 'success' || steps.approval.outcome != 'success' }}
+        run: exit 1

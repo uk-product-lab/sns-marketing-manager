@@ -77,11 +77,68 @@ jobs:
       - name: Check combined upload size without truncating evidence
         id: budget
         if: ${{ always() }}
-        run: >-
-          node trusted/harness/scripts/ci-upload-budget.mjs
-          "artifacts/ci/install-${{ matrix.gate }}"
-          "artifacts/ci/browsers-${{ matrix.gate }}"
-          "artifacts/ci/${{ matrix.gate }}"
+        run: |
+          node --input-type=module - "${{ matrix.gate }}" \
+            "artifacts/ci/install-${{ matrix.gate }}" \
+            "artifacts/ci/browsers-${{ matrix.gate }}" \
+            "artifacts/ci/${{ matrix.gate }}" <<'SNS_CI_PACKAGING_GUARD'
+          import { lstat, readdir, readFile } from 'node:fs/promises';
+          import { join } from 'node:path';
+
+          const refuse = () => { throw new Error('CI upload evidence packaging refused.'); };
+          async function info(path) {
+            try { return await lstat(path); }
+            catch (error) { if (error.code === 'ENOENT') return null; throw error; }
+          }
+          async function directory(path) {
+            const entry = await info(path);
+            if (entry && !entry.isDirectory()) refuse();
+            return entry;
+          }
+          async function metadata(path, size) {
+            if (!size || size > 64 * 1024) refuse();
+            const bytes = await readFile(path);
+            const data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+            if (!data || Array.isArray(data) || typeof data !== 'object' ||
+                JSON.stringify(Object.keys(data)) !== JSON.stringify(['status', 'failedTests']) ||
+                !['passed', 'failed', 'timedout', 'interrupted'].includes(data.status) ||
+                !Array.isArray(data.failedTests) || data.failedTests.length > 500 ||
+                data.failedTests.some(id => typeof id !== 'string' || !/^[a-f0-9]{20}-[a-f0-9]{20}$/.test(id)) ||
+                new Set(data.failedTests).size !== data.failedTests.length) refuse();
+            const canonical = Buffer.from(JSON.stringify({ status: data.status, failedTests: data.failedTests }, undefined, 2));
+            if (!bytes.equals(canonical)) refuse();
+          }
+          async function visit(path, relative, metadataAllowed) {
+            const entry = await lstat(path);
+            const name = relative.split('/').at(-1);
+            if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) refuse();
+            if (name.startsWith('.')) {
+              if (!entry.isFile() || !metadataAllowed || relative !== 'test-results/.last-run.json') refuse();
+              await metadata(path, entry.size);
+            }
+            if (entry.isDirectory()) for (const child of await readdir(path)) {
+              await visit(join(path, child), relative ? relative + '/' + child : child, metadataAllowed);
+            }
+          }
+          try {
+            const [gate, ...roots] = process.argv.slice(2);
+            if (!['static', 'unit', 'e2e-chromium', 'e2e-webkit-mobile', 'accessibility'].includes(gate) ||
+                JSON.stringify(roots) !== JSON.stringify(['artifacts/ci/install-' + gate, 'artifacts/ci/browsers-' + gate, 'artifacts/ci/' + gate])) refuse();
+            await directory('artifacts');
+            await directory('artifacts/ci');
+            for (const [index, root] of roots.entries()) if (await directory(root)) {
+              const metadataAllowed = index === 2 && ['e2e-chromium', 'e2e-webkit-mobile'].includes(gate);
+              for (const child of await readdir(root)) await visit(join(root, child), child, metadataAllowed);
+            }
+          } catch {
+            process.stderr.write('CI upload evidence packaging refused.\n');
+            process.exitCode = 1;
+          }
+          SNS_CI_PACKAGING_GUARD
+          node trusted/harness/scripts/ci-upload-budget.mjs \
+            "artifacts/ci/install-${{ matrix.gate }}" \
+            "artifacts/ci/browsers-${{ matrix.gate }}" \
+            "artifacts/ci/${{ matrix.gate }}"
       - name: Upload bounded real evidence including failures
         if: ${{ always() && steps.budget.outcome == 'success' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -93,3 +150,4 @@ jobs:
             artifacts/ci/${{ matrix.gate }}/
           if-no-files-found: error
           retention-days: 1
+          include-hidden-files: true

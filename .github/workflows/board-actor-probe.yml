@@ -1,0 +1,277 @@
+name: Secretless board actor probe
+run-name: board-actor-probe:${{ inputs.mode }}:${{ inputs.probe_id }}
+
+# Publication and actual dispatch remain separate human decisions (TASK-0006).
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: dispatch for token path; direct-negative for human self-review rejection; receive is dispatcher-only
+        type: choice
+        options: [dispatch, direct-negative, receive]
+        required: true
+      probe_id:
+        description: New synthetic UUID v4; never reuse a prior probe ID
+        type: string
+        required: true
+      fixed_sha:
+        description: Exact currently approved main commit SHA
+        type: string
+        required: true
+      source_run_id:
+        description: Empty except for dispatcher-generated receive inputs
+        type: string
+        default: ''
+      source_attempt:
+        description: Empty except for dispatcher-generated receive inputs
+        type: string
+        default: ''
+      acknowledgement:
+        description: SYNTHETIC_PROBE_ONLY is a safety acknowledgement, not external authorization
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: board-actor-probe-${{ inputs.mode }}-${{ inputs.probe_id }}
+  cancel-in-progress: false
+
+env:
+  PROBE_REPOSITORY_ID: ${{ github.repository_id }}
+  PROBE_RUN_ATTEMPT: ${{ github.run_attempt }}
+  PROBE_WORKFLOW_REF: ${{ github.workflow_ref }}
+  PROBE_WORKFLOW_SHA: ${{ github.workflow_sha }}
+  PROBE_ACTOR_ID: ${{ github.actor_id }}
+  PROBE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Reject unsafe context before checking out any repository code
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          retries: 0
+          script: |
+            const inputs = context.payload.inputs;
+            const keys = ['mode', 'probe_id', 'fixed_sha', 'source_run_id', 'source_attempt', 'acknowledgement'];
+            if (context.eventName !== 'workflow_dispatch' || `${context.repo.owner}/${context.repo.repo}` !== 'uk-product-lab/sns-marketing-manager' ||
+                context.ref !== 'refs/heads/main' || process.env.PROBE_RUN_ATTEMPT !== '1' ||
+                process.env.PROBE_WORKFLOW_REF !== 'uk-product-lab/sns-marketing-manager/.github/workflows/board-actor-probe.yml@refs/heads/main' ||
+                !inputs || JSON.stringify(Object.keys(inputs).sort()) !== JSON.stringify(keys.sort()) ||
+                !['dispatch', 'receive', 'direct-negative'].includes(inputs.mode) ||
+                !/^[a-f0-9]{40}$/.test(inputs.fixed_sha) || inputs.fixed_sha !== context.sha || process.env.PROBE_WORKFLOW_SHA !== context.sha) {
+              throw new Error('PROBE_CONTEXT_REJECTED');
+            }
+            const response = await github.request('GET /repos/{owner}/{repo}/branches/{branch}', {
+              owner: 'uk-product-lab', repo: 'sns-marketing-manager', branch: 'main',
+              headers: { accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2026-03-10' },
+            }).catch(() => { throw new Error('PROBE_MAIN_READ_BLOCKED'); });
+            if (response.status !== 200 || response.data.name !== 'main' || response.data.commit?.sha !== context.sha) throw new Error('PROBE_MAIN_CHANGED');
+
+  dispatcher:
+    needs: boundary
+    if: ${{ inputs.mode == 'dispatch' && github.repository == 'uk-product-lab/sns-marketing-manager' && github.ref == 'refs/heads/main' && github.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: harness/scripts
+          persist-credentials: false
+      - name: Validate main and existing Environment; dispatch once; save bound receipt
+        id: dispatch
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          retries: 0
+          script: |
+            const probe = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-actor-probe.mjs`);
+            await probe.runWorkflowStage('dispatch', {
+              api: probe.createRuntimeApi(github), context: probe.runtimeContext(context, process.env),
+              inputs: context.payload.inputs, root: 'probe-dispatch',
+            });
+      - name: Bound receipt upload allocation
+        id: receipt_budget
+        if: ${{ steps.dispatch.outcome == 'success' }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const probe = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-actor-probe.mjs`);
+            await probe.uploadBudget('probe-dispatch/receipt');
+      - name: Publish immutable producer receipt (no overwrite)
+        if: ${{ steps.receipt_budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: board-actor-receipt-${{ github.run_id }}-1
+          path: probe-dispatch/receipt/dispatch-receipt.json
+          if-no-files-found: error
+          overwrite: false
+          compression-level: 0
+          retention-days: 1
+      - name: Bound dispatcher observation allocation
+        id: observation_budget
+        if: ${{ always() }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const probe = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-actor-probe.mjs`);
+            await probe.uploadBudget('probe-dispatch/observation');
+      - name: Preserve first dispatcher outcome
+        if: ${{ always() && steps.observation_budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: board-actor-dispatch-observation-${{ github.run_id }}-1
+          path: probe-dispatch/observation/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 1
+
+  preflight:
+    needs: boundary
+    if: ${{ (inputs.mode == 'receive' || inputs.mode == 'direct-negative') && github.repository == 'uk-product-lab/sns-marketing-manager' && github.ref == 'refs/heads/main' && github.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      verified: ${{ steps.guard.outputs.verified }}
+      environment: ${{ steps.guard.outputs.environment }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: harness/scripts
+          persist-credentials: false
+      - name: Bind actual receiver to trusted producer; READ protected Environment before scheduling
+        id: guard
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          PROBE_READ_TOKEN: ${{ github.token }}
+        with:
+          retries: 0
+          script: |
+            const probe = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-actor-probe.mjs`);
+            const result = await probe.runWorkflowStage('guard', {
+              api: probe.createRuntimeApi(github, process.env.PROBE_READ_TOKEN), context: probe.runtimeContext(context, process.env),
+              inputs: context.payload.inputs, root: 'probe-preflight',
+            });
+            core.setOutput('environment', JSON.stringify(result.snapshot.environment));
+            core.setOutput('verified', 'true');
+      - name: Bound preflight allocation
+        id: budget
+        if: ${{ always() }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const probe = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-actor-probe.mjs`);
+            await probe.uploadBudget('probe-preflight/observation');
+      - name: Preserve first guard outcome
+        if: ${{ always() && steps.budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: board-actor-guard-${{ github.run_id }}-1
+          path: probe-preflight/observation/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 1
+
+  protected_observation:
+    needs: preflight
+    if: ${{ needs.preflight.outputs.verified == 'true' && inputs.mode == 'receive' }}
+    environment: board-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: harness/scripts
+          persist-credentials: false
+      - name: Recheck provenance, Environment and review history; synthetic marker only
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          PROBE_READ_TOKEN: ${{ github.token }}
+          PROBE_EXPECTED_ENVIRONMENT: ${{ needs.preflight.outputs.environment }}
+        with:
+          retries: 0
+          script: |
+            const probe = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-actor-probe.mjs`);
+            await probe.runWorkflowStage('protected', {
+              api: probe.createRuntimeApi(github, process.env.PROBE_READ_TOKEN), context: probe.runtimeContext(context, process.env),
+              inputs: context.payload.inputs, expectedEnvironment: JSON.parse(process.env.PROBE_EXPECTED_ENVIRONMENT), root: 'probe-protected',
+            });
+      - name: Bound protected allocation
+        id: budget
+        if: ${{ always() }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const probe = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-actor-probe.mjs`);
+            await probe.uploadBudget('probe-protected/observation');
+      - name: Preserve marker or first failure (never product PASS)
+        if: ${{ always() && steps.budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: board-actor-protected-${{ github.run_id }}-1
+          path: probe-protected/observation/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 1
+
+  self_review_negative:
+    needs: preflight
+    if: ${{ needs.preflight.outputs.verified == 'true' && inputs.mode == 'direct-negative' }}
+    environment: board-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: harness/scripts
+          persist-credentials: false
+      - name: Unexpected execution is negative-test failure; no positive marker
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          PROBE_EXPECTED_ENVIRONMENT: ${{ needs.preflight.outputs.environment }}
+        with:
+          retries: 0
+          script: |
+            const probe = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-actor-probe.mjs`);
+            await probe.runWorkflowStage('negative', {
+              api: probe.createRuntimeApi(github), context: probe.runtimeContext(context, process.env),
+              inputs: context.payload.inputs, expectedEnvironment: JSON.parse(process.env.PROBE_EXPECTED_ENVIRONMENT), root: 'probe-negative',
+            });
+      - name: Bound negative-test allocation
+        id: budget
+        if: ${{ always() }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const probe = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-actor-probe.mjs`);
+            await probe.uploadBudget('probe-negative/observation');
+      - name: Preserve unexpected negative execution failure
+        if: ${{ always() && steps.budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: board-actor-negative-${{ github.run_id }}-1
+          path: probe-negative/observation/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 1

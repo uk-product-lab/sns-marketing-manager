@@ -58,14 +58,67 @@ jobs:
         with:
           retries: 0
           script: |
-            const inputs = context.payload.inputs;
             const keys = ['mode', 'probe_id', 'fixed_sha', 'source_run_id', 'source_attempt', 'acknowledgement'];
-            if (context.eventName !== 'workflow_dispatch' || `${context.repo.owner}/${context.repo.repo}` !== 'uk-product-lab/sns-marketing-manager' ||
+            let inputs, rejected = true, evaluationAvailable = false;
+            try {
+              inputs = context.payload.inputs;
+              // Keep the original acceptance predicate; diagnostics cannot authorize a run.
+              rejected = context.eventName !== 'workflow_dispatch' || `${context.repo.owner}/${context.repo.repo}` !== 'uk-product-lab/sns-marketing-manager' ||
                 context.ref !== 'refs/heads/main' || process.env.PROBE_RUN_ATTEMPT !== '1' ||
                 process.env.PROBE_WORKFLOW_REF !== 'uk-product-lab/sns-marketing-manager/.github/workflows/board-actor-probe.yml@refs/heads/main' ||
-                !inputs || JSON.stringify(Object.keys(inputs).sort()) !== JSON.stringify(keys.sort()) ||
+                !inputs || JSON.stringify(Object.keys(inputs).sort()) !== JSON.stringify([...keys].sort()) ||
                 !['dispatch', 'receive', 'direct-negative'].includes(inputs.mode) ||
-                !/^[a-f0-9]{40}$/.test(inputs.fixed_sha) || inputs.fixed_sha !== context.sha || process.env.PROBE_WORKFLOW_SHA !== context.sha) {
+                !/^[a-f0-9]{40}$/.test(inputs.fixed_sha) || inputs.fixed_sha !== context.sha || process.env.PROBE_WORKFLOW_SHA !== context.sha;
+              evaluationAvailable = true;
+            } catch {
+              // Never include an arbitrary evaluation error or its input in the log.
+            }
+            if (rejected) {
+              let diagnostic = {
+                schema: 'board-actor-boundary-diagnostic:v1',
+                reasons: ['DIAGNOSTIC_UNAVAILABLE'],
+                evaluationAvailable, diagnosticAvailable: false,
+              };
+              try {
+                const inputKeys = inputs ? Object.keys(inputs) : [];
+                const checks = {
+                  EVENT_NAME_MISMATCH: context?.eventName === 'workflow_dispatch',
+                  REPOSITORY_MISMATCH: `${context?.repo?.owner}/${context?.repo?.repo}` === 'uk-product-lab/sns-marketing-manager',
+                  REF_MISMATCH: context?.ref === 'refs/heads/main',
+                  RUN_ATTEMPT_MISMATCH: process.env.PROBE_RUN_ATTEMPT === '1',
+                  WORKFLOW_REF_MISMATCH: process.env.PROBE_WORKFLOW_REF === 'uk-product-lab/sns-marketing-manager/.github/workflows/board-actor-probe.yml@refs/heads/main',
+                  INPUTS_MISSING: Boolean(inputs),
+                  INPUT_KEYS_MISMATCH: Boolean(inputs) && JSON.stringify([...inputKeys].sort()) === JSON.stringify([...keys].sort()),
+                  MODE_NOT_ALLOWED: ['dispatch', 'receive', 'direct-negative'].includes(inputs?.mode),
+                  FIXED_SHA_FORMAT_INVALID: /^[a-f0-9]{40}$/.test(inputs?.fixed_sha),
+                  FIXED_SHA_CONTEXT_MISMATCH: inputs?.fixed_sha === context?.sha,
+                  WORKFLOW_SHA_CONTEXT_MISMATCH: process.env.PROBE_WORKFLOW_SHA === context?.sha,
+                };
+                const valueType = (value) => value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value;
+                diagnostic = {
+                  schema: 'board-actor-boundary-diagnostic:v1',
+                  reasons: [
+                    ...(!evaluationAvailable ? ['BOUNDARY_EVALUATION_UNAVAILABLE'] : []),
+                    ...Object.keys(checks).filter((code) => !checks[code]),
+                  ],
+                  evaluationAvailable, diagnosticAvailable: true, checksPassed: checks,
+                  inputsType: valueType(inputs),
+                  knownInputs: Object.fromEntries(keys.map((key) => [key, {
+                    present: inputs != null && Object.prototype.hasOwnProperty.call(inputs, key),
+                    type: valueType(inputs?.[key]),
+                  }])),
+                  unknownKeyCount: inputKeys.filter((key) => !keys.includes(key)).length,
+                };
+              } catch {
+                // Retain the fixed fallback diagnostic; no arbitrary exception text.
+              }
+              try {
+                if (typeof core !== 'undefined' && typeof core.error === 'function') {
+                  core.error('PROBE_BOUNDARY_DIAGNOSTIC ' + JSON.stringify(diagnostic));
+                }
+              } catch {
+                // Logging failure must still end in the original fixed rejection below.
+              }
               throw new Error('PROBE_CONTEXT_REJECTED');
             }
             const response = await github.request('GET /repos/{owner}/{repo}/branches/{branch}', {

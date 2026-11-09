@@ -479,3 +479,171 @@ test("PROBE-001 boundary embedded runtime rejects unsafe contexts before reposit
   }
   assert.equal(reads, 1);
 });
+
+// TASK-0008 executes the actual checkout-free boundary script. These fixtures
+// do not establish what GitHub put in the failed real run's event payload.
+const boundaryDiagnosticPrefix = "PROBE_BOUNDARY_DIAGNOSTIC ";
+const boundaryInputKeys = ["mode", "probe_id", "fixed_sha", "source_run_id", "source_attempt", "acknowledgement"];
+let boundaryDiagnosticScript;
+async function boundaryDiagnosticFixture(mode = "dispatch") {
+  if (!boundaryDiagnosticScript) {
+    const path = new URL("../../.github/workflows/board-actor-probe.yml", import.meta.url);
+    const workflow = JSON.parse(execFileSync("ruby", ["-ryaml", "-rjson", "-e", 'print JSON.generate(YAML.load_file(ARGV[0]))', path.pathname], { encoding: "utf8" }));
+    boundaryDiagnosticScript = workflow.jobs.boundary.steps[0].with.script;
+  }
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const execute = new AsyncFunction("github", "context", "process", "core", boundaryDiagnosticScript);
+  const f = {
+    context: { repo: { owner: "uk-product-lab", repo: "sns-marketing-manager" }, ref: "refs/heads/main", sha: SHA,
+      eventName: "workflow_dispatch", payload: { inputs: input(mode) } },
+    env: { PROBE_RUN_ATTEMPT: "1", PROBE_WORKFLOW_REF: context().workflowRef, PROBE_WORKFLOW_SHA: SHA },
+    calls: [], messages: [],
+  };
+  f.core = { error: (message) => f.messages.push(message) };
+  f.github = { request: async (route, params) => {
+    f.calls.push({ route, params });
+    assert.equal(route, "GET /repos/{owner}/{repo}/branches/{branch}");
+    assert.equal(params.owner + "/" + params.repo, probe.REPOSITORY);
+    assert.equal(params.branch, "main");
+    assert.equal(params.headers["X-GitHub-Api-Version"], probe.API_VERSION);
+    return { status: 200, data: { name: "main", commit: { sha: SHA } } };
+  } };
+  f.execute = () => execute(f.github, f.context, { env: f.env }, f.core);
+  return f;
+}
+async function rejectedBoundaryDiagnostic(f, expectedReason) {
+  await assert.rejects(f.execute(), (error) => error.message === "PROBE_CONTEXT_REJECTED");
+  assert.equal(f.calls.length, 0); // Neither the main READ nor any write is reached.
+  assert.equal(f.messages.length, 1); assert.equal(typeof f.messages[0], "string");
+  assert.ok(f.messages[0].startsWith(boundaryDiagnosticPrefix));
+  const diagnostic = JSON.parse(f.messages[0].slice(boundaryDiagnosticPrefix.length));
+  assert.equal(diagnostic.schema, "board-actor-boundary-diagnostic:v1");
+  assert.equal(diagnostic.reasons.includes(expectedReason), true);
+  if (diagnostic.checksPassed && expectedReason in diagnostic.checksPassed) assert.equal(diagnostic.checksPassed[expectedReason], false);
+  return diagnostic;
+}
+
+for (const mode of ["dispatch", "receive", "direct-negative"]) test("DIAG-001/004 accepted boundary retains one fixed main READ without rejection diagnostics: " + mode, async () => {
+  const f = await boundaryDiagnosticFixture(mode); await f.execute();
+  assert.equal(f.calls.length, 1); assert.deepEqual(f.messages, []);
+  assert.deepEqual(probe.parseInputs(f.context.payload.inputs), input(mode));
+});
+
+for (const [name, change, reason] of [
+  ["event", (f) => { f.context.eventName = "push"; }, "EVENT_NAME_MISMATCH"],
+  ["repository owner", (f) => { f.context.repo.owner = "synthetic-fork"; }, "REPOSITORY_MISMATCH"],
+  ["repository name", (f) => { f.context.repo.repo = "synthetic-other"; }, "REPOSITORY_MISMATCH"],
+  ["feature ref", (f) => { f.context.ref = "refs/heads/feature"; }, "REF_MISMATCH"],
+  ["tag ref", (f) => { f.context.ref = "refs/tags/main"; }, "REF_MISMATCH"],
+  ["attempt", (f) => { f.env.PROBE_RUN_ATTEMPT = "2"; }, "RUN_ATTEMPT_MISMATCH"],
+  ["workflow ref", (f) => { f.env.PROBE_WORKFLOW_REF += "-other"; }, "WORKFLOW_REF_MISMATCH"],
+  ["unknown mode", (f) => { f.context.payload.inputs.mode = "unknown"; }, "MODE_NOT_ALLOWED"],
+  ["numeric mode", (f) => { f.context.payload.inputs.mode = 1; }, "MODE_NOT_ALLOWED"],
+  ["SHA format", (f) => { f.context.payload.inputs.fixed_sha = "invalid"; }, "FIXED_SHA_FORMAT_INVALID"],
+  ["array SHA", (f) => { f.context.payload.inputs.fixed_sha = [SHA]; }, "FIXED_SHA_CONTEXT_MISMATCH"],
+  ["input SHA binding", (f) => { f.context.payload.inputs.fixed_sha = OTHER_SHA; }, "FIXED_SHA_CONTEXT_MISMATCH"],
+  ["context SHA binding", (f) => { f.context.sha = OTHER_SHA; }, "FIXED_SHA_CONTEXT_MISMATCH"],
+  ["workflow SHA", (f) => { f.env.PROBE_WORKFLOW_SHA = OTHER_SHA; }, "WORKFLOW_SHA_CONTEXT_MISMATCH"],
+  ["unknown key", (f) => { f.context.payload.inputs.unknown = "synthetic"; }, "INPUT_KEYS_MISMATCH"],
+  ["missing payload", (f) => { f.context.payload = undefined; }, "BOUNDARY_EVALUATION_UNAVAILABLE"],
+  ["missing repository object", (f) => { f.context.repo = undefined; }, "REPOSITORY_MISMATCH"],
+]) test("DIAG-002/004 embedded boundary identifies rejection predicate: " + name, async () => {
+  const f = await boundaryDiagnosticFixture(); change(f);
+  const d = await rejectedBoundaryDiagnostic(f, reason);
+  assert.equal(d.diagnosticAvailable, true);
+  assert.equal(Object.values(d.checksPassed).every((value) => typeof value === "boolean"), true);
+  assert.deepEqual(Object.keys(d.knownInputs), boundaryInputKeys);
+});
+
+for (const [name, value, expectedType] of [
+  ["undefined", undefined, "undefined"], ["null", null, "null"], ["array", [], "array"],
+  ["string", "synthetic", "string"], ["empty string", "", "string"],
+  ["number", 1, "number"], ["zero", 0, "number"], ["boolean", false, "boolean"],
+]) test("DIAG-003/004 malformed input shape is classified without values or API calls: " + name, async () => {
+  const f = await boundaryDiagnosticFixture(); f.context.payload.inputs = value;
+  const d = await rejectedBoundaryDiagnostic(f, "INPUT_KEYS_MISMATCH");
+  assert.equal(d.inputsType, expectedType);
+  assert.equal(d.unknownKeyCount, typeof value === "string" ? value.length : 0);
+  for (const observed of Object.values(d.knownInputs)) assert.deepEqual(observed, { present: false, type: "undefined" });
+});
+
+for (const key of ["mode", "probe_id", "fixed_sha", "acknowledgement"]) test("DIAG-004 omitted required boundary key remains rejected: " + key, async () => {
+  const f = await boundaryDiagnosticFixture(); delete f.context.payload.inputs[key];
+  const d = await rejectedBoundaryDiagnostic(f, "INPUT_KEYS_MISMATCH");
+  assert.deepEqual(d.knownInputs[key], { present: false, type: "undefined" });
+  assert.equal(d.unknownKeyCount, 0);
+});
+
+for (const mode of ["dispatch", "receive", "direct-negative"]) test("DIAG-001/004 omitted empty optional source key is not normalized into acceptance: " + mode, async () => {
+  const f = await boundaryDiagnosticFixture(mode); delete f.context.payload.inputs.source_run_id;
+  const d = await rejectedBoundaryDiagnostic(f, "INPUT_KEYS_MISMATCH");
+  assert.deepEqual(d.knownInputs.source_run_id, { present: false, type: "undefined" });
+});
+test("DIAG-004 two omitted optional source keys are distinguishable from six supplied empty inputs", async () => {
+  const f = await boundaryDiagnosticFixture(); delete f.context.payload.inputs.source_run_id; delete f.context.payload.inputs.source_attempt;
+  const d = await rejectedBoundaryDiagnostic(f, "INPUT_KEYS_MISMATCH");
+  for (const key of ["source_run_id", "source_attempt"]) assert.deepEqual(d.knownInputs[key], { present: false, type: "undefined" });
+  const supplied = await boundaryDiagnosticFixture(); await supplied.execute();
+  assert.equal(supplied.calls.length, 1); assert.deepEqual(supplied.messages, []);
+});
+
+for (const [name, mode, change, code] of [
+  ["numeric acknowledgement", "dispatch", (i) => { i.acknowledgement = 1; }, "ACKNOWLEDGEMENT_INVALID"],
+  ["numeric probe id", "dispatch", (i) => { i.probe_id = 1; }, "INPUT_IDENTITY_INVALID"],
+  ["receive empty source", "receive", (i) => { i.source_run_id = ""; }, "SOURCE_INPUT_INVALID"],
+  ["receive numeric source", "receive", (i) => { i.source_run_id = SOURCE; }, "SOURCE_INPUT_INVALID"],
+  ["receive numeric attempt", "receive", (i) => { i.source_attempt = 1; }, "SOURCE_INPUT_INVALID"],
+  ["dispatch recursive source", "dispatch", (i) => { i.source_run_id = String(SOURCE); }, "RECURSIVE_INPUT_REJECTED"],
+]) test("DIAG-001/004 downstream strict parser retains rejection outside the unchanged boundary predicate: " + name, async () => {
+  const f = await boundaryDiagnosticFixture(mode); change(f.context.payload.inputs); await f.execute();
+  assert.equal(f.calls.length, 1); assert.deepEqual(f.messages, []);
+  assert.throws(() => probe.parseInputs(f.context.payload.inputs), (error) => error instanceof probe.ProbeError && error.code === code);
+});
+
+test("DIAG-002 multiple predicate failures retain every applicable static reason", async () => {
+  const f = await boundaryDiagnosticFixture(); f.context.ref = "refs/tags/main"; f.env.PROBE_RUN_ATTEMPT = "2"; f.env.PROBE_WORKFLOW_SHA = OTHER_SHA;
+  const d = await rejectedBoundaryDiagnostic(f, "REF_MISMATCH");
+  assert.deepEqual(d.reasons, ["REF_MISMATCH", "RUN_ATTEMPT_MISMATCH", "WORKFLOW_SHA_CONTEXT_MISMATCH"]);
+});
+test("DIAG-003/005 hostile input names and values never enter the structured diagnostic", async () => {
+  const f = await boundaryDiagnosticFixture(), canary = "synthetic-boundary-secret-canary-never-log";
+  f.context.payload.inputs = Object.fromEntries(boundaryInputKeys.map((key) => [key, canary]));
+  f.context.payload.inputs[canary + "\n::error::"] = canary;
+  f.context.eventName = canary; f.context.repo.owner = canary; f.context.repo.repo = canary; f.context.ref = canary; f.context.sha = canary;
+  f.env.PROBE_RUN_ATTEMPT = canary; f.env.PROBE_WORKFLOW_REF = canary; f.env.PROBE_WORKFLOW_SHA = canary;
+  const d = await rejectedBoundaryDiagnostic(f, "INPUT_KEYS_MISMATCH");
+  assert.equal(d.unknownKeyCount, 1); assert.equal(f.messages[0].includes(canary), false);
+  assert.equal(f.messages[0].includes("::error::"), false);
+  for (const observed of Object.values(d.knownInputs)) assert.deepEqual(observed, { present: true, type: "string" });
+  assert.ok(f.messages[0].length < 4096);
+});
+test("DIAG-003/005 raw input toJSON is never called by diagnostic serialization", async () => {
+  const f = await boundaryDiagnosticFixture(); let serialized = 0;
+  f.context.payload.inputs.toJSON = () => { serialized++; throw new Error("synthetic-serialization-secret"); };
+  const d = await rejectedBoundaryDiagnostic(f, "INPUT_KEYS_MISMATCH");
+  assert.equal(serialized, 0); assert.equal(d.unknownKeyCount, 1);
+  assert.equal(f.messages[0].includes("synthetic-serialization-secret"), false);
+});
+test("DIAG-003/005 evaluation and diagnostic exceptions still reject with fixed sanitized output", async () => {
+  const f = await boundaryDiagnosticFixture();
+  Object.defineProperty(f.context.payload.inputs, "mode", { enumerable: true, get() { throw new Error("synthetic-getter-secret"); } });
+  const d = await rejectedBoundaryDiagnostic(f, "DIAGNOSTIC_UNAVAILABLE");
+  assert.equal(d.evaluationAvailable, false); assert.equal(d.diagnosticAvailable, false);
+  assert.equal(f.messages[0].includes("synthetic-getter-secret"), false);
+});
+test("DIAG-003 failed diagnostic sink cannot continue to the main READ or expose its error", async () => {
+  const f = await boundaryDiagnosticFixture(); f.context.ref = "refs/heads/feature";
+  f.core.error = () => { throw new Error("synthetic-diagnostic-sink-secret"); };
+  await assert.rejects(f.execute(), (error) => error.message === "PROBE_CONTEXT_REJECTED");
+  assert.equal(f.calls.length, 0);
+});
+test("DIAG-001/006 valid context retains fixed failures from the real main READ", async () => {
+  const f = await boundaryDiagnosticFixture(); let reads = 0;
+  f.github.request = async () => { reads++; throw new Error("synthetic-upstream-read-secret"); };
+  await assert.rejects(f.execute(), (error) => error.message === "PROBE_MAIN_READ_BLOCKED");
+  assert.equal(reads, 1); assert.deepEqual(f.messages, []);
+  const changed = await boundaryDiagnosticFixture();
+  changed.github.request = async () => ({ status: 200, data: { name: "main", commit: { sha: OTHER_SHA } } });
+  await assert.rejects(changed.execute(), (error) => error.message === "PROBE_MAIN_CHANGED");
+  assert.deepEqual(changed.messages, []);
+});

@@ -4,6 +4,23 @@ TASK-0006 / DEC-022。採用済みなのは専用 probe のローカル実装・
 
 この文書と LOCAL mock の成功は、実 Linux、bot actor、本人操作、自己承認拒否、GitHub 費用、Environment 鍵隔離、Repository Gate、製品 PASS、公開、merge の証明・許可ではない。probe は本番 attestation/status へ接続しない。
 
+## TASK-0008のboundary診断候補
+
+2026-11-08のDEC-035は[新タスク](tasks/TASK-0008-probe-boundary-diagnostics.md)と[DDR-0016](decisions/DDR-0016-probe-boundary-diagnostics.md)のLOCAL候補作成・資格だけを承認した。基準mainは`8641e60728b12b8b471ae3310cf0b2cc0ad2ff3e`、treeは`f4f6c1391ed518cefa49b05c109a841930bb322d`。新候補の外部公開・CI・採用・診断runは別判断であり、以下の旧手順の未承認記述や過去の限定承認を追加試行へ転用しない。
+
+初回実run42446097435 attempt1はcheckout前の`PROBE_CONTEXT_REJECTED`で失敗し、受信run/receipt/承認履歴は0だった。実event payloadと個別拒否条件は原物にない。空の任意入力がGitHub eventから省略されたという説明も未証明の仮説であり、この診断追加は元障害の修復・解消を宣言する変更ではない。
+
+boundaryの元の複合受理predicate、総合拒否`PROBE_CONTEXT_REJECTED`、正常時のcurrent main GETは維持する。拒否時だけ`core.error`へ`PROBE_BOUNDARY_DIAGNOSTIC `に続けて`board-actor-boundary-diagnostic:v1`の最小JSONを記録する。checkout前のため専用artifactを作る処理は追加せず、通常のGitHub job logに残す。
+
+- `reasons`: event/repository/ref/attempt/workflow ref/入力の存在・key集合/mode/SHA形式・結合の各失敗を識別する静的コード配列。複数の不一致も記録する。
+- `checksPassed`: 各静的理由コードをキーとし、その対応条件が成立すれば`true`、不成立なら`false`。入力値や未知キー名は含めない。
+- `inputsType`と`knownInputs`: 6個の既知キーだけの存在booleanと静的な型（`undefined`/`null`/`array`または`typeof`の有限値）。`unknownKeyCount`は未知キーの件数のみ。
+- `evaluationAvailable`/`diagnosticAvailable`: 元判定または診断を安全に計算できたか。診断不能時は固定の`DIAGNOSTIC_UNAVAILABLE`だけを含む小さいfallbackにする。元判定の例外を識別できる場合は`BOUNDARY_EVALUATION_UNAVAILABLE`も記録する。
+
+診断へraw event、入力値、未知キー名、任意ref/SHA文字列、token/header/署名URL、任意例外のmessage/stackを渡さない。ログ出力が失敗しても`PROBE_CONTEXT_REJECTED`で停止し、main READ/checkout/POSTへ進めない。任意入力が省略されたfixtureは引き続きkey集合不一致で拒否し、空文字列で補完しない。boundary後の`parseInputs`にあるsource/acknowledgement/UUIDの厳密検査も変更しない。
+
+既存全試験に加え、実workflow embedded JSから正常3mode、各predicate、欠落/不正型/複数違反、合成秘密の非漏えい、serialization/getter/log sinkの例外、後続parseInputsとmain READの維持を検証する。ローカルfixtureは失敗した実runのeventを再構成した証拠ではない。
+
 ## 実装値と処理
 
 - 固定対象: Public `uk-product-lab/sns-marketing-manager`、`main`、`.github/workflows/board-actor-probe.yml`、`board-review`、本人 reviewer `ukyo-0001`。

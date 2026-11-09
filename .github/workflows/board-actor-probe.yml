@@ -58,15 +58,23 @@ jobs:
         with:
           retries: 0
           script: |
-            const keys = ['mode', 'probe_id', 'fixed_sha', 'source_run_id', 'source_attempt', 'acknowledgement'];
+            const sourceKeys = ['source_run_id', 'source_attempt'];
+            const keys = ['mode', 'probe_id', 'fixed_sha', ...sourceKeys, 'acknowledgement'];
+            const inputKeysMatch = (value) => {
+              if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+              const sourceOptional = ['dispatch', 'direct-negative'].includes(value.mode);
+              const expected = keys.filter((key) => !sourceOptional || !sourceKeys.includes(key) || Object.hasOwn(value, key));
+              const actual = Object.keys(value);
+              return actual.length === expected.length && expected.every((key) => actual.includes(key));
+            };
             let inputs, rejected = true, evaluationAvailable = false;
             try {
               inputs = context.payload.inputs;
-              // Keep the original acceptance predicate; diagnostics cannot authorize a run.
+              // Validate the payload before checkout. Diagnostics cannot authorize a run.
               rejected = context.eventName !== 'workflow_dispatch' || `${context.repo.owner}/${context.repo.repo}` !== 'uk-product-lab/sns-marketing-manager' ||
                 context.ref !== 'refs/heads/main' || process.env.PROBE_RUN_ATTEMPT !== '1' ||
                 process.env.PROBE_WORKFLOW_REF !== 'uk-product-lab/sns-marketing-manager/.github/workflows/board-actor-probe.yml@refs/heads/main' ||
-                !inputs || JSON.stringify(Object.keys(inputs).sort()) !== JSON.stringify([...keys].sort()) ||
+                !inputKeysMatch(inputs) ||
                 !['dispatch', 'receive', 'direct-negative'].includes(inputs.mode) ||
                 !/^[a-f0-9]{40}$/.test(inputs.fixed_sha) || inputs.fixed_sha !== context.sha || process.env.PROBE_WORKFLOW_SHA !== context.sha;
               evaluationAvailable = true;
@@ -88,7 +96,7 @@ jobs:
                   RUN_ATTEMPT_MISMATCH: process.env.PROBE_RUN_ATTEMPT === '1',
                   WORKFLOW_REF_MISMATCH: process.env.PROBE_WORKFLOW_REF === 'uk-product-lab/sns-marketing-manager/.github/workflows/board-actor-probe.yml@refs/heads/main',
                   INPUTS_MISSING: Boolean(inputs),
-                  INPUT_KEYS_MISMATCH: Boolean(inputs) && JSON.stringify([...inputKeys].sort()) === JSON.stringify([...keys].sort()),
+                  INPUT_KEYS_MISMATCH: inputKeysMatch(inputs),
                   MODE_NOT_ALLOWED: ['dispatch', 'receive', 'direct-negative'].includes(inputs?.mode),
                   FIXED_SHA_FORMAT_INVALID: /^[a-f0-9]{40}$/.test(inputs?.fixed_sha),
                   FIXED_SHA_CONTEXT_MISMATCH: inputs?.fixed_sha === context?.sha,

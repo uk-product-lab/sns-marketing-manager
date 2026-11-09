@@ -48,15 +48,19 @@ function runTitle(mode, probeId) { return `board-actor-probe:${mode}:${probeId}`
 export function receiptName(runId) { requireCondition(positiveId(runId), "RUN_ID_INVALID"); return `board-actor-receipt-${runId}-1`; }
 
 export function parseInputs(value) {
-  exactKeys(value, ["mode", "probe_id", "fixed_sha", "source_run_id", "source_attempt", "acknowledgement"], "INPUT_KEYS_INVALID");
+  const sourceOptional = ["dispatch", "direct-negative"].includes(value?.mode);
+  const sourceKeys = ["source_run_id", "source_attempt"].filter((key) => !sourceOptional || Object.hasOwn(value, key));
+  exactKeys(value, ["mode", "probe_id", "fixed_sha", ...sourceKeys, "acknowledgement"], "INPUT_KEYS_INVALID");
   requireCondition(["dispatch", "receive", "direct-negative"].includes(value.mode), "MODE_INVALID");
   requireCondition(uuidPattern.test(value.probe_id ?? "") && shaPattern.test(value.fixed_sha ?? ""), "INPUT_IDENTITY_INVALID");
   requireCondition(value.acknowledgement === "SYNTHETIC_PROBE_ONLY", "ACKNOWLEDGEMENT_INVALID");
+  const sourceRunId = Object.hasOwn(value, "source_run_id") ? value.source_run_id : "";
+  const sourceAttempt = Object.hasOwn(value, "source_attempt") ? value.source_attempt : "";
   if (value.mode === "receive") {
-    requireCondition(typeof value.source_run_id === "string" && /^[1-9][0-9]*$/.test(value.source_run_id) && positiveId(Number(value.source_run_id)) && value.source_attempt === "1", "SOURCE_INPUT_INVALID");
-  } else requireCondition(value.source_run_id === "" && value.source_attempt === "", "RECURSIVE_INPUT_REJECTED");
+    requireCondition(typeof sourceRunId === "string" && /^[1-9][0-9]*$/.test(sourceRunId) && positiveId(Number(sourceRunId)) && sourceAttempt === "1", "SOURCE_INPUT_INVALID");
+  } else requireCondition(sourceRunId === "" && sourceAttempt === "", "RECURSIVE_INPUT_REJECTED");
   return { mode: value.mode, probe_id: value.probe_id, fixed_sha: value.fixed_sha,
-    source_run_id: value.source_run_id, source_attempt: value.source_attempt, acknowledgement: value.acknowledgement };
+    source_run_id: sourceRunId, source_attempt: sourceAttempt, acknowledgement: value.acknowledgement };
 }
 
 export function runtimeContext(context, env) {

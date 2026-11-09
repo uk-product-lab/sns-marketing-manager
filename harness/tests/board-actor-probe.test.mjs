@@ -574,17 +574,60 @@ for (const key of ["mode", "probe_id", "fixed_sha", "acknowledgement"]) test("DI
   assert.equal(d.unknownKeyCount, 0);
 });
 
-for (const mode of ["dispatch", "receive", "direct-negative"]) test("DIAG-001/004 omitted empty optional source key is not normalized into acceptance: " + mode, async () => {
-  const f = await boundaryDiagnosticFixture(mode); delete f.context.payload.inputs.source_run_id;
+const sourceKeyOmissions = [["source_run_id"], ["source_attempt"], ["source_run_id", "source_attempt"]];
+for (const mode of ["dispatch", "direct-negative"]) {
+  for (const keys of sourceKeyOmissions) test("SRC-001 permits omitted source inputs in " + mode + ": " + keys.join(", "), async () => {
+    const f = await boundaryDiagnosticFixture(mode);
+    const inputs = f.context.payload.inputs;
+    for (const key of keys) delete inputs[key];
+    await f.execute();
+    assert.equal(f.calls.length, 1);
+    assert.deepEqual(f.messages, []);
+    assert.deepEqual(probe.parseInputs(inputs), input(mode));
+    for (const key of keys) assert.equal(Object.hasOwn(inputs, key), false);
+  });
+}
+for (const keys of sourceKeyOmissions) test("SRC-002 receive rejects omitted source inputs: " + keys.join(", "), async () => {
+  const f = await boundaryDiagnosticFixture("receive");
+  const inputs = f.context.payload.inputs;
+  for (const key of keys) delete inputs[key];
   const d = await rejectedBoundaryDiagnostic(f, "INPUT_KEYS_MISMATCH");
-  assert.deepEqual(d.knownInputs.source_run_id, { present: false, type: "undefined" });
+  for (const key of keys) assert.deepEqual(d.knownInputs[key], { present: false, type: "undefined" });
+  assert.throws(() => probe.parseInputs(inputs), { code: "INPUT_KEYS_INVALID" });
 });
-test("DIAG-004 two omitted optional source keys are distinguishable from six supplied empty inputs", async () => {
-  const f = await boundaryDiagnosticFixture(); delete f.context.payload.inputs.source_run_id; delete f.context.payload.inputs.source_attempt;
-  const d = await rejectedBoundaryDiagnostic(f, "INPUT_KEYS_MISMATCH");
-  for (const key of ["source_run_id", "source_attempt"]) assert.deepEqual(d.knownInputs[key], { present: false, type: "undefined" });
-  const supplied = await boundaryDiagnosticFixture(); await supplied.execute();
-  assert.equal(supplied.calls.length, 1); assert.deepEqual(supplied.messages, []);
+
+for (const [mode, stage] of [["dispatch", "dispatch"], ["direct-negative", "guard"]]) test("SRC-003 four-key payload reaches the " + stage + " stage", async () => {
+  const f = fixture(mode);
+  delete f.inputs.source_run_id;
+  delete f.inputs.source_attempt;
+  const boundary = await boundaryDiagnosticFixture(mode);
+  boundary.context.payload.inputs = f.inputs;
+  await boundary.execute();
+  assert.equal(boundary.calls.length, 1);
+  assert.deepEqual(boundary.messages, []);
+  const root = await mkdtemp(join(tmpdir(), "board-probe-omitted-source-"));
+  const result = await probe.runWorkflowStage(stage, { ...f, ...f.options, root });
+  const writes = f.calls.filter(({ route }) => route?.startsWith("POST "));
+  if (mode === "dispatch") {
+    assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0].params.inputs, input("receive"));
+    assert.equal(result.receipt.receiver.id, RECEIVER);
+  } else {
+    assert.equal(writes.length, 0);
+    assert.equal(result.expected, "SELF_REVIEW_MUST_BE_DENIED");
+    assert.equal(result.positiveMarker, false);
+  }
+});
+
+for (const key of ["probe_id", "extra"]) test("SRC-002 source omissions do not mask key mismatch: " + key, async () => {
+  const f = await boundaryDiagnosticFixture();
+  const inputs = f.context.payload.inputs;
+  delete inputs.source_run_id;
+  delete inputs.source_attempt;
+  if (key === "extra") inputs.extra = "synthetic";
+  else delete inputs[key];
+  await rejectedBoundaryDiagnostic(f, "INPUT_KEYS_MISMATCH");
+  assert.throws(() => probe.parseInputs(inputs), { code: "INPUT_KEYS_INVALID" });
 });
 
 for (const [name, mode, change, code] of [
@@ -594,7 +637,9 @@ for (const [name, mode, change, code] of [
   ["receive numeric source", "receive", (i) => { i.source_run_id = SOURCE; }, "SOURCE_INPUT_INVALID"],
   ["receive numeric attempt", "receive", (i) => { i.source_attempt = 1; }, "SOURCE_INPUT_INVALID"],
   ["dispatch recursive source", "dispatch", (i) => { i.source_run_id = String(SOURCE); }, "RECURSIVE_INPUT_REJECTED"],
-]) test("DIAG-001/004 downstream strict parser retains rejection outside the unchanged boundary predicate: " + name, async () => {
+  ["dispatch explicit undefined source with omitted attempt", "dispatch", (i) => { i.source_run_id = undefined; delete i.source_attempt; }, "RECURSIVE_INPUT_REJECTED"],
+  ["direct-negative explicit null attempt with omitted source", "direct-negative", (i) => { i.source_attempt = null; delete i.source_run_id; }, "RECURSIVE_INPUT_REJECTED"],
+]) test("DIAG-001/004 downstream strict parser retains input value rejection: " + name, async () => {
   const f = await boundaryDiagnosticFixture(mode); change(f.context.payload.inputs); await f.execute();
   assert.equal(f.calls.length, 1); assert.deepEqual(f.messages, []);
   assert.throws(() => probe.parseInputs(f.context.payload.inputs), (error) => error instanceof probe.ProbeError && error.code === code);

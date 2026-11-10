@@ -111,6 +111,130 @@ test("PROBE-002/003 dispatcher executes one fixed main POST and captures actual 
   assert.deepEqual(result.receipt.receiver.run.actor, bot); assert.equal(result.receipt.source.workflowSha, SHA);
   assert.equal(result.receipt.source.actor.id, actor.id); assert.equal(f.calls.some((item) => /secrets|variables|statuses|deployments\//.test(item.route ?? "")), false);
 });
+
+const receiverReadCalls = (f) => f.calls.filter(({ route, params }) =>
+  route?.endsWith("/actions/runs/{run_id}") && params.run_id === RECEIVER);
+const postCalls = (f) => f.calls.filter(({ route }) => route?.startsWith("POST "));
+
+test("PRV-001 dispatcher creates a receipt only after the same receiver metadata is ready", async () => {
+  const f = fixture(), root = await mkdtemp(join(tmpdir(), "board-probe-ready-receiver-"));
+  const title = f.state.receiver.display_title;
+  delete f.state.receiver.display_title;
+  f.state.receiver.head_sha = null;
+  const delays = [];
+  const result = await probe.runWorkflowStage("dispatch", { ...f, ...f.options, root, sleep: async (ms) => {
+    assert.deepEqual(await readdir(root), []);
+    delays.push(ms);
+    f.state.now += ms;
+    f.state.receiver.head_sha = SHA;
+    f.state.receiver.display_title = delays.length === 1 ? "" : title;
+  } });
+  assert.deepEqual(delays, [3000, 3000]);
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 3);
+  const receipt = JSON.parse(await readFile(join(root, "receipt", "dispatch-receipt.json"), "utf8"));
+  assert.deepEqual(receipt, result.receipt);
+  assert.equal(Object.hasOwn(receipt, "receiverRead"), false);
+  assert.equal(receipt.receiver.run.id, RECEIVER);
+  const observation = JSON.parse(await readFile(join(root, "observation", "result.json"), "utf8"));
+  assert.deepEqual(observation.receiverRead, {
+    reads: 3,
+    firstIssues: [{ field: "head_sha", kind: "missing" }, { field: "display_title", kind: "missing" }],
+    lastIssues: [],
+  });
+});
+
+test("PRV-001 persistent missing metadata stops after six reads and leaves no receipt", async () => {
+  const f = fixture(), root = await mkdtemp(join(tmpdir(), "board-probe-unready-receiver-"));
+  f.state.receiver.display_title = null;
+  const delays = [];
+  await rejectsCode(probe.runWorkflowStage("dispatch", { ...f, ...f.options, root, sleep: async (ms) => {
+    delays.push(ms);
+    f.state.now += ms;
+  } }), "RECEIVER_PROVENANCE_READ_TIMEOUT");
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 6);
+  assert.deepEqual(delays, [3000, 3000, 3000, 3000, 3000]);
+  assert.deepEqual(await readdir(root), ["observation"]);
+  const observation = JSON.parse(await readFile(join(root, "observation", "result.json"), "utf8"));
+  assert.equal(observation.result, "BLOCKED");
+  assert.equal(observation.positiveMarker, false);
+  assert.deepEqual(observation.receiverRead, {
+    reads: 6,
+    firstIssues: [{ field: "display_title", kind: "missing" }],
+    lastIssues: [{ field: "display_title", kind: "missing" }],
+  });
+});
+
+test("PRV-001 no additional GET starts once the time window passes", async () => {
+  const f = fixture();
+  f.state.receiver.display_title = null;
+  await rejectsCode(probe.dispatchProbe(f.api, f.context, f.inputs, { ...f.options, sleep: async () => {
+    f.state.now += 20_001;
+  } }), "RECEIVER_PROVENANCE_READ_TIMEOUT");
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 1);
+});
+
+for (const [name, change, code] of [
+  ["different receiver ID", (r) => { r.id++; }, "RUN_PROVENANCE_INVALID"],
+  ["different head SHA", (r) => { r.head_sha = OTHER_SHA; }, "RUN_PROVENANCE_INVALID"],
+  ["wrong workflow ID type", (r) => { r.workflow_id = String(WORKFLOW_ID); }, "RUN_PROVENANCE_INVALID"],
+  ["partial repository object", (r) => { r.repository = {}; }, "RUN_PROVENANCE_INVALID"],
+  ["completed receiver", (r) => { r.status = "completed"; r.conclusion = "failure"; }, "RUN_PROVENANCE_INVALID"],
+  ["changed triggering actor", (r) => { r.triggering_actor = clone(actor); }, "TRIGGERING_ACTOR_CHANGED"],
+]) test("PRV-002 incomplete metadata with " + name + " stops immediately", async () => {
+  const f = fixture();
+  f.state.receiver.display_title = null;
+  change(f.state.receiver);
+  await rejectsCode(probe.dispatchProbe(f.api, f.context, f.inputs, {
+    ...f.options, sleep: () => assert.fail("Conflicting metadata must stop"),
+  }), code);
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 1);
+});
+
+test("PRV-002 receiver GET status error stops immediately", async () => {
+  const f = fixture();
+  f.state.override = (route, params) => route.endsWith("/actions/runs/{run_id}") && params.run_id === RECEIVER
+    ? { status: 404, data: null } : undefined;
+  await rejectsCode(probe.dispatchProbe(f.api, f.context, f.inputs, {
+    ...f.options, sleep: () => assert.fail("Failed read must stop"),
+  }), "API_READ_STATUS_INVALID");
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 1);
+});
+
+test("PRV-003 records the fields from the first and final reads without unexpected values", async () => {
+  const f = fixture(), root = await mkdtemp(join(tmpdir(), "board-probe-receiver-diagnostic-"));
+  f.state.receiver.display_title = null;
+  const canary = "unexpected-receiver-title-with-synthetic-private-data";
+  await rejectsCode(probe.runWorkflowStage("dispatch", { ...f, ...f.options, root, sleep: async (ms) => {
+    f.state.now += ms;
+    f.state.receiver.display_title = canary;
+  } }), "RUN_PROVENANCE_INVALID");
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 2);
+  assert.deepEqual(await readdir(root), ["observation"]);
+  const raw = await readFile(join(root, "observation", "result.json"), "utf8");
+  assert.equal(raw.includes(canary), false);
+  assert.deepEqual(JSON.parse(raw).receiverRead, {
+    reads: 2,
+    firstIssues: [{ field: "display_title", kind: "missing" }],
+    lastIssues: [{ field: "display_title", kind: "mismatch" }],
+  });
+});
+
+test("PRV-004 receive preflight rejects its own incomplete metadata", async () => {
+  const f = await readyFixture();
+  f.state.receiver.display_title = null;
+  await rejectsCode(probe.receiveProbe(f.api, f.context, f.inputs, {
+    ...f.options, sleep: () => assert.fail("Receive provenance must be complete"),
+  }), "RUN_PROVENANCE_INVALID");
+  assert.equal(postCalls(f).length, 0);
+  assert.equal(receiverReadCalls(f).length, 1);
+});
+
 for (const [name, change, code] of [
   ["204", (f) => { f.state.dispatchResponse = { status: 204, data: null }; }, "DISPATCH_RESPONSE_INVALID_NO_RETRY"],
   ["malformed 200", (f) => { f.state.dispatchResponse.data = {}; }, "DISPATCH_BODY_INVALID"],

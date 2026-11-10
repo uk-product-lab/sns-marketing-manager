@@ -29,6 +29,12 @@ TASK-0008ではboundaryの複合受理条件を維持した。拒否時だけ`co
 - `dispatch`と`direct-negative`では、`source_run_id`と`source_attempt`を省略できる。後続パーサーは省略されたキーだけを空文字列で補う。明示された値は空文字列のみ許可する。
 - `receive`では両キーを必須とし、従来どおり正の起動元run IDとattempt `"1"`を検査する。正常時のmain GETとSHA照合も維持する。
 
+## TASK-0010の受信run来歴の確認
+
+DEC-039では起動元が受信runを作成し、その直後のGETで `RUN_PROVENANCE_INVALID` が発生した。終了後の来歴照合は全項目に一致し、作成直後の不一致項目は未特定。 [起動元run](https://github.com/uk-product-lab/sns-marketing-manager/actions/runs/42724275145) ・ [受信run](https://github.com/uk-product-lab/sns-marketing-manager/actions/runs/42724310511)
+
+[TASK-0010](tasks/TASK-0010-probe-receiver-provenance.md)では、POSTの200応答で確認したIDに対するGETを、稼働中かつ来歴項目が未設定の場合に限り3秒間隔で読み直す。初回を含め最大6回、追加GETの開始は初回から20秒以内。未設定は欠落またはnull、表示名のみ空文字も含む。明示的な不一致、API失敗、終端runの欠落は即停止する。全来歴と時刻・actor検証を通過した後にreceiptを作る。起動元の観測にはGET回数と、初回および最終回の不足・不一致の項目名を記録する。
+
 ## 実装値と処理
 
 - 固定対象: Public `uk-product-lab/sns-marketing-manager`、`main`、`.github/workflows/board-actor-probe.yml`、`board-review`、本人 reviewer `ukyo-0001`。

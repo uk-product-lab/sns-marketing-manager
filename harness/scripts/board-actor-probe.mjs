@@ -14,6 +14,8 @@ export const ARCHIVE_BYTES = 64 * 1024;
 export const RECEIPT_TTL_MS = 60 * 60 * 1000;
 export const READ_WAIT_MS = 120_000;
 export const READ_INTERVAL_MS = 3_000;
+const RECEIVER_READ_LIMIT = 6;
+const RECEIVER_READ_WINDOW_MS = 20_000;
 // Five bounded upload sites, even if all were reached: 20 MiB / 500.
 export const UPLOAD_SLOTS = 5;
 export const UPLOAD_BYTES = 20 * 1024 * 1024 / UPLOAD_SLOTS;
@@ -24,9 +26,15 @@ const workflowRef = `${REPOSITORY}/${WORKFLOW}@refs/heads/main`;
 const activeStates = new Set(["queued", "in_progress", "waiting", "pending", "requested"]);
 const positiveId = (value) => Number.isSafeInteger(value) && value > 0;
 const hash = (value) => createHash("sha256").update(value).digest("hex");
+const sleepForRead = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 export class ProbeError extends Error {
-  constructor(code, result = "FAIL") { super(code); this.code = code; this.result = result; }
+  constructor(code, result = "FAIL", receiverRead) {
+    super(code);
+    this.code = code;
+    this.result = result;
+    if (receiverRead) this.receiverRead = receiverRead;
+  }
 }
 function requireCondition(condition, code, result) { if (!condition) throw new ProbeError(code, result); }
 function exactKeys(value, keys, code) {
@@ -98,20 +106,41 @@ export function validateEnvironment(environment, policies) {
   return { ...observed, fingerprint: hash(JSON.stringify(observed)) };
 }
 
-function validateRun(run, { runId, workflowId, repositoryId, fixedSha, mode, probeId, now }) {
-  requireCondition(run && run.id === runId && positiveId(runId) && run.workflow_id === workflowId &&
-    [WORKFLOW, `${WORKFLOW}@main`, `${WORKFLOW}@refs/heads/main`].includes(run.path) && run.event === "workflow_dispatch" &&
-    run.head_branch === "main" && run.head_sha === fixedSha && run.run_attempt === 1 &&
-    run.repository?.id === repositoryId && run.repository.full_name === REPOSITORY &&
-    run.head_repository?.id === repositoryId && run.head_repository.full_name === REPOSITORY &&
-    run.html_url === `https://github.com/${REPOSITORY}/actions/runs/${runId}` &&
-    run.url === `https://api.github.com/repos/${REPOSITORY}/actions/runs/${runId}` &&
-    run.display_title === runTitle(mode, probeId), "RUN_PROVENANCE_INVALID");
+function runProvenanceIssues(run, { runId, workflowId, repositoryId, fixedSha, mode, probeId }) {
+  const { id, workflow_id, path, event, head_branch, head_sha, run_attempt,
+    repository, head_repository, html_url, url, display_title } = run ?? {};
+  const checks = [
+    ["id", id, id === runId && positiveId(runId)],
+    ["workflow_id", workflow_id, workflow_id === workflowId],
+    ["path", path, [WORKFLOW, `${WORKFLOW}@main`, `${WORKFLOW}@refs/heads/main`].includes(path)],
+    ["event", event, event === "workflow_dispatch"],
+    ["head_branch", head_branch, head_branch === "main"],
+    ["head_sha", head_sha, head_sha === fixedSha],
+    ["run_attempt", run_attempt, run_attempt === 1],
+    ["repository", repository, repository?.id === repositoryId && repository?.full_name === REPOSITORY],
+    ["head_repository", head_repository, head_repository?.id === repositoryId && head_repository?.full_name === REPOSITORY],
+    ["html_url", html_url, html_url === `https://github.com/${REPOSITORY}/actions/runs/${runId}`],
+    ["url", url, url === `https://api.github.com/repos/${REPOSITORY}/actions/runs/${runId}`],
+    ["display_title", display_title, display_title === runTitle(mode, probeId)],
+  ];
+  return checks.filter(([, , matches]) => !matches).map(([field, value]) => ({
+    field, kind: value == null || (field === "display_title" && value === "") ? "missing" : "mismatch",
+  }));
+}
+
+function validateRunMetadata(run, now) {
   const created = timestamp(run.created_at, "RUN_TIME_INVALID");
   requireCondition(created <= now && now - created <= RECEIPT_TTL_MS, "RUN_EXPIRED");
   const actor = identity(run.actor), triggeringActor = identity(run.triggering_actor);
   requireCondition(actor.id === triggeringActor.id && actor.login === triggeringActor.login && actor.type === triggeringActor.type, "TRIGGERING_ACTOR_CHANGED");
   requireCondition(activeStates.has(run.status) ? run.conclusion === null : run.status === "completed" && typeof run.conclusion === "string", "RUN_STATE_INVALID");
+  return { actor, triggeringActor };
+}
+
+function validateRun(run, expected) {
+  const { runId, workflowId, repositoryId, fixedSha, mode, now } = expected;
+  requireCondition(runProvenanceIssues(run, expected).length === 0, "RUN_PROVENANCE_INVALID");
+  const { actor, triggeringActor } = validateRunMetadata(run, now);
   return { id: runId, attempt: 1, mode, workflowId, workflowRef, workflowSha: fixedSha, ref: "refs/heads/main", sha: fixedSha,
     repositoryId, actor, triggeringActor, createdAt: run.created_at, htmlUrl: run.html_url };
 }
@@ -170,7 +199,29 @@ export function validateDispatchResponse(data, sourceRunId) {
   return { id, apiUrl: data.run_url, htmlUrl: data.html_url };
 }
 
-export async function dispatchProbe(api, context, rawInputs, { now = Date.now } = {}) {
+async function readDispatchedRun(api, expected, { now, sleep }) {
+  const deadline = now() + RECEIVER_READ_WINDOW_MS;
+  let firstIssues;
+  for (let reads = 1; ; reads++) {
+    const run = await request(api, "GET /repos/{owner}/{repo}/actions/runs/{run_id}", { run_id: expected.runId });
+    const issues = runProvenanceIssues(run, expected);
+    firstIssues ??= issues;
+    const receiverRead = { reads, firstIssues, lastIssues: issues };
+    const observedAt = now();
+    if (issues.length === 0) return { run: validateRun(run, { ...expected, now: observedAt }), receiverRead };
+
+    const incomplete = run?.id === expected.runId && activeStates.has(run.status) && run.conclusion === null &&
+      issues.every(({ kind }) => kind === "missing");
+    if (!incomplete) throw new ProbeError("RUN_PROVENANCE_INVALID", "FAIL", receiverRead);
+    validateRunMetadata(run, observedAt);
+    const timeout = () => new ProbeError("RECEIVER_PROVENANCE_READ_TIMEOUT", "BLOCKED", receiverRead);
+    if (reads === RECEIVER_READ_LIMIT || observedAt + READ_INTERVAL_MS > deadline) throw timeout();
+    await sleep(READ_INTERVAL_MS);
+    if (now() > deadline) throw timeout();
+  }
+}
+
+export async function dispatchProbe(api, context, rawInputs, { now = Date.now, sleep = sleepForRead } = {}) {
   const inputs = parseInputs(rawInputs);
   requireCondition(inputs.mode === "dispatch", "DISPATCH_MODE_INVALID");
   const snapshot = await inspect(api, context, inputs, now());
@@ -183,15 +234,15 @@ export async function dispatchProbe(api, context, rawInputs, { now = Date.now } 
   const receiver = validateDispatchResponse(await request(api, "POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches", {
     workflow_id: "board-actor-probe.yml", ref: "main", inputs: childInputs,
   }), context.runId);
-  const child = validateRun(await request(api, "GET /repos/{owner}/{repo}/actions/runs/{run_id}", { run_id: receiver.id }), {
+  const { run: child, receiverRead } = await readDispatchedRun(api, {
     runId: receiver.id, workflowId: snapshot.workflowId, repositoryId: context.repositoryId,
-    fixedSha: inputs.fixed_sha, mode: "receive", probeId: inputs.probe_id, now: now(),
-  });
+    fixedSha: inputs.fixed_sha, mode: "receive", probeId: inputs.probe_id,
+  }, { now, sleep });
   const receipt = { schema: "board-actor-dispatch-receipt:v1", repository: REPOSITORY, repositoryId: context.repositoryId,
     probeId: inputs.probe_id, fixedSha: inputs.fixed_sha, source: snapshot.run, receiver: { ...receiver, run: child },
     inputs: childInputs, environment: snapshot.environment, dispatchedAt };
   requireCondition(Buffer.byteLength(JSON.stringify(receipt)) <= RECEIPT_BYTES, "RECEIPT_TOO_LARGE");
-  return { snapshot, receipt };
+  return { snapshot, receipt, receiverRead };
 }
 
 // ZIP parser never extracts. One central-directory entry, one fixed filename,
@@ -304,7 +355,7 @@ async function receive(api, context, inputs, { now, sleep, wait }) {
   }
 }
 export async function receiveProbe(api, context, rawInputs, options = {}) {
-  return receive(api, context, parseInputs(rawInputs), { now: options.now ?? Date.now, sleep: options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))), wait: options.wait ?? true });
+  return receive(api, context, parseInputs(rawInputs), { now: options.now ?? Date.now, sleep: options.sleep ?? sleepForRead, wait: options.wait ?? true });
 }
 export async function directNegativePreflight(api, context, rawInputs, { now = Date.now } = {}) {
   const inputs = parseInputs(rawInputs);
@@ -388,7 +439,7 @@ export async function runWorkflowStage(stage, { api, context, inputs, expectedEn
   try {
     let result;
     if (stage === "dispatch") {
-      result = await dispatchProbe(api, context, inputs, { now });
+      result = await dispatchProbe(api, context, inputs, { now, sleep });
       await writeEvidence(join(root, "receipt", "dispatch-receipt.json"), result.receipt);
     } else if (stage === "guard") {
       const parsed = parseInputs(inputs);
@@ -400,7 +451,8 @@ export async function runWorkflowStage(stage, { api, context, inputs, expectedEn
     return result;
   } catch (error) {
     const failure = error instanceof ProbeError ? error : new ProbeError("UNEXPECTED_PROBE_FAILURE", "BLOCKED");
-    await writeEvidence(resultFile, { stage, result: failure.result, code: failure.code, positiveMarker: false }).catch(() => undefined);
+    await writeEvidence(resultFile, { stage, result: failure.result, code: failure.code, positiveMarker: false,
+      receiverRead: failure.receiverRead }).catch(() => undefined);
     throw failure;
   }
 }

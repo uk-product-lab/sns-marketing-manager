@@ -235,6 +235,209 @@ test("PRV-004 receive preflight rejects its own incomplete metadata", async () =
   assert.equal(receiverReadCalls(f).length, 1);
 });
 
+test("TTL-001 waits for the same receiver title before emitting a receipt accepted by receive preflight", async () => {
+  const f = fixture(), root = await mkdtemp(join(tmpdir(), "board-probe-title-ready-"));
+  const title = f.state.receiver.display_title, provisional = "Synthetic provisional run title";
+  f.state.receiver.display_title = provisional;
+  f.state.receiver.status = "queued";
+  const delays = [];
+  const result = await probe.runWorkflowStage("dispatch", { ...f, ...f.options, root, sleep: async (ms) => {
+    assert.deepEqual(await readdir(root), []);
+    delays.push(ms);
+    f.state.now += ms;
+    if (delays.length === 2) {
+      f.state.receiver.display_title = title;
+      f.state.receiver.status = "in_progress";
+    }
+  } });
+  assert.deepEqual(delays, [3000, 3000]);
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 3);
+  const raw = await readFile(join(root, "observation", "result.json"), "utf8");
+  assert.equal(raw.includes(provisional), false);
+  assert.deepEqual(JSON.parse(raw).receiverRead, {
+    reads: 3,
+    firstIssues: [{ field: "display_title", kind: "mismatch" }],
+    lastIssues: [],
+  });
+  const receipt = JSON.parse(await readFile(join(root, "receipt", "dispatch-receipt.json"), "utf8"));
+  assert.deepEqual(receipt, result.receipt);
+  packageReceipt(f, receipt);
+  f.state.source.status = "completed";
+  f.state.source.conclusion = "success";
+  const received = await probe.receiveProbe(f.api, context("receive"), input("receive"), f.options);
+  assert.deepEqual(received.receipt, receipt);
+  assert.equal(postCalls(f).length, 1);
+});
+
+test("TTL-001 a persistent provisional title exhausts the original read cap without a receipt", async () => {
+  const f = fixture(), root = await mkdtemp(join(tmpdir(), "board-probe-title-timeout-"));
+  const provisional = "Unresolved synthetic title";
+  f.state.receiver.display_title = provisional;
+  await rejectsCode(probe.runWorkflowStage("dispatch", { ...f, ...f.options, root, sleep: async (ms) => {
+    assert.equal(ms, 3000);
+    f.state.now += ms;
+  } }), "RECEIVER_PROVENANCE_READ_TIMEOUT");
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 6);
+  assert.deepEqual(await readdir(root), ["observation"]);
+  const raw = await readFile(join(root, "observation", "result.json"), "utf8");
+  assert.equal(raw.includes(provisional), false);
+  assert.deepEqual(JSON.parse(raw).receiverRead, {
+    reads: 6,
+    firstIssues: [{ field: "display_title", kind: "mismatch" }],
+    lastIssues: [{ field: "display_title", kind: "mismatch" }],
+  });
+});
+
+test("TTL-001 title recovery does not start a GET after the existing deadline", async () => {
+  const f = fixture();
+  const title = f.state.receiver.display_title;
+  f.state.receiver.display_title = "Provisional";
+  await rejectsCode(probe.dispatchProbe(f.api, f.context, f.inputs, { ...f.options, sleep: async () => {
+    f.state.now += 20_001;
+    f.state.receiver.display_title = title;
+  } }), "RECEIVER_PROVENANCE_READ_TIMEOUT");
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 1);
+});
+
+for (const [label, change, code = "RUN_PROVENANCE_INVALID"] of [
+  ["another probe title", (r) => { r.display_title = `board-actor-probe:dispatch:${PROBE_ID}`; }],
+  ["a title in the probe namespace with surrounding whitespace", (r) => { r.display_title = " BOARD-ACTOR-PROBE:other "; }],
+  ["a non-string title", (r) => { r.display_title = 42; }],
+  ["a missing provenance field", (r) => { delete r.head_repository; }],
+  ["a different main SHA", (r) => { r.head_sha = OTHER_SHA; }],
+  ["a completed run", (r) => { r.status = "completed"; r.conclusion = "failure"; }],
+  ["a human receiver", (r) => { r.actor = clone(actor); r.triggering_actor = clone(actor); }, "RECEIVER_ACTOR_UNPROVEN"],
+  ["a changed triggering actor", (r) => { r.triggering_actor = clone(actor); }, "TRIGGERING_ACTOR_CHANGED"],
+  ["a run that predates the dispatch", (r) => { r.created_at = instant(-1001); }, "RECEIPT_EXPIRED"],
+]) test("TTL-002 does not wait on " + label, async () => {
+  const f = fixture();
+  f.state.receiver.display_title = "Provisional";
+  change(f.state.receiver);
+  await rejectsCode(probe.dispatchProbe(f.api, f.context, f.inputs, {
+    ...f.options, sleep: () => assert.fail("Receiver must stop before waiting"),
+  }), code);
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 1);
+});
+
+for (const [label, field, change, kind = "mismatch"] of [
+  ["the returned ID", "id", (r) => { r.id++; }],
+  ["the bot's ID", "actor.id", (r) => { r.actor.id++; r.triggering_actor.id++; }],
+  ["the creation time", "created_at", (r) => { r.created_at = instant(1000); }],
+  ["the receiver's status to completed", "status", (r) => { r.status = "completed"; r.conclusion = "failure"; }],
+  ["the repository metadata to missing", "repository", (r) => { delete r.repository; }, "missing"],
+  ["the title to a different probe", "display_title", (r) => { r.display_title = `board-actor-probe:receive:11111111-1111-4111-8111-111111111111`; }],
+]) test("TTL-002 stops if a subsequent read changes " + label, async () => {
+  const f = fixture(), title = f.state.receiver.display_title;
+  f.state.receiver.display_title = "Provisional";
+  let delays = 0;
+  await assert.rejects(probe.dispatchProbe(f.api, f.context, f.inputs, { ...f.options, sleep: async (ms) => {
+    assert.equal(++delays, 1);
+    f.state.now += ms;
+    f.state.receiver.display_title = title;
+    change(f.state.receiver);
+  } }), (error) => {
+    assert(error instanceof probe.ProbeError);
+    assert.equal(error.code, "RUN_PROVENANCE_INVALID");
+    assert.deepEqual(error.receiverRead, {
+      reads: 2,
+      firstIssues: [{ field: "display_title", kind: "mismatch" }],
+      lastIssues: [{ field, kind }],
+    });
+    return true;
+  });
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 2);
+});
+
+test("TTL-003 a failed GET keeps the previous title diagnostic and counts the attempt", async () => {
+  const f = fixture(), root = await mkdtemp(join(tmpdir(), "board-probe-title-get-failure-"));
+  const provisional = "Synthetic private placeholder", privateError = "Synthetic private API error";
+  f.state.receiver.display_title = provisional;
+  await rejectsCode(probe.runWorkflowStage("dispatch", { ...f, ...f.options, root, sleep: async (ms) => {
+    f.state.now += ms;
+    f.state.override = (route, params) => {
+      if (route.endsWith("/actions/runs/{run_id}") && params.run_id === RECEIVER) throw new Error(privateError);
+    };
+  } }), "API_READ_BLOCKED");
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 2);
+  assert.deepEqual(await readdir(root), ["observation"]);
+  const raw = await readFile(join(root, "observation", "result.json"), "utf8");
+  assert.equal(raw.includes(provisional) || raw.includes(privateError), false);
+  assert.deepEqual(JSON.parse(raw).receiverRead, {
+    reads: 2,
+    firstIssues: [{ field: "display_title", kind: "mismatch" }],
+    lastIssues: [{ field: "display_title", kind: "mismatch" }],
+  });
+});
+
+test("TTL-003 records a failed first GET without fabricating response fields", async () => {
+  const f = fixture();
+  f.state.override = (route, params) => route.endsWith("/actions/runs/{run_id}") && params.run_id === RECEIVER
+    ? { status: 403, data: null } : undefined;
+  await assert.rejects(probe.dispatchProbe(f.api, f.context, f.inputs, f.options), (error) => {
+    assert.equal(error.code, "API_READ_STATUS_INVALID");
+    assert.deepEqual(error.receiverRead, { reads: 1, firstIssues: [], lastIssues: [] });
+    return true;
+  });
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 1);
+});
+
+test("TTL-003 includes invalid creation metadata from the first response in both issue lists", async () => {
+  const f = fixture();
+  f.state.receiver.display_title = "Provisional";
+  delete f.state.receiver.created_at;
+  const issues = [{ field: "display_title", kind: "mismatch" }, { field: "created_at", kind: "missing" }];
+  await assert.rejects(probe.dispatchProbe(f.api, f.context, f.inputs, {
+    ...f.options, sleep: () => assert.fail("Missing creation metadata must stop"),
+  }), (error) => {
+    assert.equal(error.code, "RUN_TIME_INVALID");
+    assert.deepEqual(error.receiverRead, { reads: 1, firstIssues: issues, lastIssues: issues });
+    return true;
+  });
+  assert.equal(receiverReadCalls(f).length, 1);
+});
+
+for (const [field, change, code, kind] of [
+  ["created_at", (r) => { r.created_at = "invalid"; }, "RUN_TIME_INVALID", "mismatch"],
+  ["actor", (r) => { delete r.actor; }, "RUN_IDENTITY_INVALID", "missing"],
+  ["triggering_actor", (r) => { r.triggering_actor = clone(actor); }, "TRIGGERING_ACTOR_CHANGED", "mismatch"],
+]) test("TTL-003 records an invalid " + field + " after the expected title appears", async () => {
+  const f = fixture(), title = f.state.receiver.display_title;
+  f.state.receiver.display_title = "Provisional";
+  await assert.rejects(probe.dispatchProbe(f.api, f.context, f.inputs, { ...f.options, sleep: async (ms) => {
+    f.state.now += ms;
+    f.state.receiver.display_title = title;
+    change(f.state.receiver);
+  } }), (error) => {
+    assert.equal(error.code, code);
+    assert.deepEqual(error.receiverRead, {
+      reads: 2,
+      firstIssues: [{ field: "display_title", kind: "mismatch" }],
+      lastIssues: [{ field, kind }],
+    });
+    return true;
+  });
+  assert.equal(postCalls(f).length, 1);
+  assert.equal(receiverReadCalls(f).length, 2);
+});
+
+test("TTL-002 receive preflight rejects a provisional title before reading the producer receipt", async () => {
+  const f = await readyFixture();
+  f.state.receiver.display_title = "Provisional";
+  await rejectsCode(probe.receiveProbe(f.api, f.context, f.inputs, {
+    ...f.options, sleep: () => assert.fail("Receive provenance must be complete"),
+  }), "RUN_PROVENANCE_INVALID");
+  assert.equal(postCalls(f).length, 0);
+  assert.equal(receiverReadCalls(f).length, 1);
+  assert.equal(f.calls.some(({ download, route }) => download || route?.endsWith("/artifacts")), false);
+});
+
 for (const [name, change, code] of [
   ["204", (f) => { f.state.dispatchResponse = { status: 204, data: null }; }, "DISPATCH_RESPONSE_INVALID_NO_RETRY"],
   ["malformed 200", (f) => { f.state.dispatchResponse.data = {}; }, "DISPATCH_BODY_INVALID"],

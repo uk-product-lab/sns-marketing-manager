@@ -33,7 +33,13 @@ TASK-0008ではboundaryの複合受理条件を維持した。拒否時だけ`co
 
 DEC-039では起動元が受信runを作成し、その直後のGETで `RUN_PROVENANCE_INVALID` が発生した。終了後の来歴照合は全項目に一致し、作成直後の不一致項目は未特定。 [起動元run](https://github.com/uk-product-lab/sns-marketing-manager/actions/runs/42724275145) ・ [受信run](https://github.com/uk-product-lab/sns-marketing-manager/actions/runs/42724310511)
 
-[TASK-0010](tasks/TASK-0010-probe-receiver-provenance.md)では、POSTの200応答で確認したIDに対するGETを、稼働中かつ来歴項目が未設定の場合に限り3秒間隔で読み直す。初回を含め最大6回、追加GETの開始は初回から20秒以内。未設定は欠落またはnull、表示名のみ空文字も含む。明示的な不一致、API失敗、終端runの欠落は即停止する。全来歴と時刻・actor検証を通過した後にreceiptを作る。起動元の観測にはGET回数と、初回および最終回の不足・不一致の項目名を記録する。
+[TASK-0010](tasks/TASK-0010-probe-receiver-provenance.md)では、POSTの200応答で確認したIDに対し、稼働中かつ来歴項目が未設定の場合の再取得を導入した。未設定には欠落とnullを含み、表示名に限って空文字も含む。初回を含め最大6回、3秒間隔、追加GETの開始は初回から20秒以内。全来歴と時刻・actor検証を通過した後にreceiptを作る。
+
+## TASK-0011の受信run表示名の確認
+
+DEC-040の初回GETは `display_title` だけが不一致で `RUN_PROVENANCE_INVALID` になり、終了後の同じrunでは全12項目が一致した。初回の表示名と変化の理由は未特定。 [起動元run](https://github.com/uk-product-lab/sns-marketing-manager/actions/runs/42946500798) ・ [受信run](https://github.com/uk-product-lab/sns-marketing-manager/actions/runs/42946543833)
+
+[TASK-0011](tasks/TASK-0011-probe-receiver-display-title.md)では、起動元が最初に受信runを取得したとき、稼働中で表示名以外の11項目が一致し、作成時刻とbotの身元が確認できる場合に、予約接頭辞を持たない文字列の表示名を保留扱いにする。同じIDを従来の間隔と上限で読み直す。保留中は毎回、時刻とbot IDが同一で、ほかの来歴が期待値に一致することを確認する。別probeを示す表示名、型違い、ほかの来歴項目の異常、API失敗、終端化で停止する。receiptには全12項目の一致が必要で、受信側でも全項目を照合する。起動元の観測に残すのは取得の試行回数と、最初と最後に確認できた応答の不足・不一致の項目名。
 
 ## 実装値と処理
 

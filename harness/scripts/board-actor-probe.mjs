@@ -23,6 +23,7 @@ export const UPLOAD_FILES = 500 / UPLOAD_SLOTS;
 const shaPattern = /^[a-f0-9]{40}$/;
 const uuidPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const workflowRef = `${REPOSITORY}/${WORKFLOW}@refs/heads/main`;
+const runTitlePrefix = "board-actor-probe:";
 const activeStates = new Set(["queued", "in_progress", "waiting", "pending", "requested"]);
 const positiveId = (value) => Number.isSafeInteger(value) && value > 0;
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -41,18 +42,22 @@ function exactKeys(value, keys, code) {
   requireCondition(value && typeof value === "object" && !Array.isArray(value) &&
     JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort()), code);
 }
-function timestamp(value, code) {
-  requireCondition(typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) && Number.isFinite(Date.parse(value)), code);
+function timestamp(value, code, check = requireCondition) {
+  check(typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) && Number.isFinite(Date.parse(value)), code);
   const canonical = new Date(Date.parse(value)).toISOString();
-  requireCondition(canonical === value || canonical.replace(".000Z", "Z") === value, code);
+  check(canonical === value || canonical.replace(".000Z", "Z") === value, code);
   return Date.parse(value);
 }
-function identity(value) {
-  requireCondition(value && positiveId(value.id) && typeof value.login === "string" &&
+function identity(value, check = requireCondition) {
+  check(value && positiveId(value.id) && typeof value.login === "string" &&
     /^[a-zA-Z0-9][a-zA-Z0-9[\]-]{0,60}$/.test(value.login) && ["User", "Bot"].includes(value.type), "RUN_IDENTITY_INVALID");
   return { login: value.login, id: value.id, type: value.type };
 }
-function runTitle(mode, probeId) { return `board-actor-probe:${mode}:${probeId}`; }
+function runTitle(mode, probeId) { return `${runTitlePrefix}${mode}:${probeId}`; }
+function requireReceiverActor(actor, reviewerId, check = requireCondition) {
+  check(actor.type === "Bot" && actor.login === "github-actions[bot]" && actor.id !== reviewerId,
+    "RECEIVER_ACTOR_UNPROVEN", "BLOCKED");
+}
 export function receiptName(runId) { requireCondition(positiveId(runId), "RUN_ID_INVALID"); return `board-actor-receipt-${runId}-1`; }
 
 export function parseInputs(value) {
@@ -106,6 +111,10 @@ export function validateEnvironment(environment, policies) {
   return { ...observed, fingerprint: hash(JSON.stringify(observed)) };
 }
 
+function runIssue(field, value) {
+  return { field, kind: value == null || (field === "display_title" && value === "") ? "missing" : "mismatch" };
+}
+
 function runProvenanceIssues(run, { runId, workflowId, repositoryId, fixedSha, mode, probeId }) {
   const { id, workflow_id, path, event, head_branch, head_sha, run_attempt,
     repository, head_repository, html_url, url, display_title } = run ?? {};
@@ -123,24 +132,27 @@ function runProvenanceIssues(run, { runId, workflowId, repositoryId, fixedSha, m
     ["url", url, url === `https://api.github.com/repos/${REPOSITORY}/actions/runs/${runId}`],
     ["display_title", display_title, display_title === runTitle(mode, probeId)],
   ];
-  return checks.filter(([, , matches]) => !matches).map(([field, value]) => ({
-    field, kind: value == null || (field === "display_title" && value === "") ? "missing" : "mismatch",
-  }));
+  return checks.filter(([, , matches]) => !matches).map(([field, value]) => runIssue(field, value));
 }
 
-function validateRunMetadata(run, now) {
-  const created = timestamp(run.created_at, "RUN_TIME_INVALID");
-  requireCondition(created <= now && now - created <= RECEIPT_TTL_MS, "RUN_EXPIRED");
-  const actor = identity(run.actor), triggeringActor = identity(run.triggering_actor);
-  requireCondition(actor.id === triggeringActor.id && actor.login === triggeringActor.login && actor.type === triggeringActor.type, "TRIGGERING_ACTOR_CHANGED");
-  requireCondition(activeStates.has(run.status) ? run.conclusion === null : run.status === "completed" && typeof run.conclusion === "string", "RUN_STATE_INVALID");
-  return { actor, triggeringActor };
+function validateRunMetadata(run, now, checkField = () => requireCondition) {
+  const checkCreatedAt = checkField("created_at");
+  const created = timestamp(run.created_at, "RUN_TIME_INVALID", checkCreatedAt);
+  checkCreatedAt(created <= now && now - created <= RECEIPT_TTL_MS, "RUN_EXPIRED");
+  const actor = identity(run.actor, checkField("actor"));
+  const checkTriggeringActor = checkField("triggering_actor");
+  const triggeringActor = identity(run.triggering_actor, checkTriggeringActor);
+  checkTriggeringActor(actor.id === triggeringActor.id && actor.login === triggeringActor.login && actor.type === triggeringActor.type, "TRIGGERING_ACTOR_CHANGED");
+  const active = activeStates.has(run.status);
+  checkField("status")(active || run.status === "completed", "RUN_STATE_INVALID");
+  checkField("conclusion")(active ? run.conclusion === null : typeof run.conclusion === "string", "RUN_STATE_INVALID");
+  return { actor, triggeringActor, created };
 }
 
-function validateRun(run, expected) {
+function validateRun(run, expected, checkField) {
   const { runId, workflowId, repositoryId, fixedSha, mode, now } = expected;
   requireCondition(runProvenanceIssues(run, expected).length === 0, "RUN_PROVENANCE_INVALID");
-  const { actor, triggeringActor } = validateRunMetadata(run, now);
+  const { actor, triggeringActor } = validateRunMetadata(run, now, checkField);
   return { id: runId, attempt: 1, mode, workflowId, workflowRef, workflowSha: fixedSha, ref: "refs/heads/main", sha: fixedSha,
     repositoryId, actor, triggeringActor, createdAt: run.created_at, htmlUrl: run.html_url };
 }
@@ -162,7 +174,7 @@ async function duplicateGuard(api, snapshot, inputs) {
   requireCondition(runs.length === total && new Set(runs.map((item) => item.id)).size === runs.length, "RUN_LIST_INCOMPLETE", "BLOCKED");
   // One UUID owns either one negative run or one dispatch/current-receiver pair.
   // Include unknown phases too: a malformed prior phase cannot release its UUID.
-  const same = runs.filter((item) => item.display_title.startsWith("board-actor-probe:") && item.display_title.endsWith(`:${inputs.probe_id}`));
+  const same = runs.filter((item) => item.display_title.startsWith(runTitlePrefix) && item.display_title.endsWith(`:${inputs.probe_id}`));
   const allowed = new Map([[snapshot.run.id, runTitle(inputs.mode, inputs.probe_id)]]);
   if (inputs.mode === "receive") allowed.set(Number(inputs.source_run_id), runTitle("dispatch", inputs.probe_id));
   requireCondition(same.length === allowed.size && same.every((item) => allowed.get(item.id) === item.display_title), "DUPLICATE_PROBE_REJECTED");
@@ -199,21 +211,60 @@ export function validateDispatchResponse(data, sourceRunId) {
   return { id, apiUrl: data.run_url, htmlUrl: data.html_url };
 }
 
-async function readDispatchedRun(api, expected, { now, sleep }) {
-  const deadline = now() + RECEIVER_READ_WINDOW_MS;
-  let firstIssues;
-  for (let reads = 1; ; reads++) {
-    const run = await request(api, "GET /repos/{owner}/{repo}/actions/runs/{run_id}", { run_id: expected.runId });
-    const issues = runProvenanceIssues(run, expected);
-    firstIssues ??= issues;
-    const receiverRead = { reads, firstIssues, lastIssues: issues };
-    const observedAt = now();
-    if (issues.length === 0) return { run: validateRun(run, { ...expected, now: observedAt }), receiverRead };
+function titleMayBePending(run, issues) {
+  if (issues.length !== 1 || issues[0].field !== "display_title") return false;
+  return issues[0].kind === "missing" || (typeof run.display_title === "string" &&
+    !run.display_title.trimStart().toLowerCase().startsWith(runTitlePrefix));
+}
 
-    const incomplete = run?.id === expected.runId && activeStates.has(run.status) && run.conclusion === null &&
-      issues.every(({ kind }) => kind === "missing");
-    if (!incomplete) throw new ProbeError("RUN_PROVENANCE_INVALID", "FAIL", receiverRead);
-    validateRunMetadata(run, observedAt);
+async function readDispatchedRun(api, expected, { now, sleep, dispatchedAtMs, reviewerId }) {
+  const deadline = now() + RECEIVER_READ_WINDOW_MS;
+  let firstIssues = [], lastIssues = [], titleWaitIdentity;
+  for (let reads = 1; ; reads++) {
+    let run;
+    try {
+      run = await request(api, "GET /repos/{owner}/{repo}/actions/runs/{run_id}", { run_id: expected.runId });
+    } catch (error) {
+      if (error instanceof ProbeError) throw new ProbeError(error.code, error.result, { reads, firstIssues, lastIssues });
+      throw error;
+    }
+    const issues = runProvenanceIssues(run, expected);
+    if (reads === 1) firstIssues = issues;
+    lastIssues = issues;
+    const receiverRead = { reads, firstIssues, lastIssues };
+    const observedAt = now();
+    const active = run?.id === expected.runId && activeStates.has(run.status) && run.conclusion === null;
+    const pendingTitle = titleMayBePending(run, issues);
+    const firstTitleMismatch = reads === 1 && pendingTitle && issues[0].kind === "mismatch";
+    const fail = (code, result, extra = []) => {
+      const observed = [...issues, ...extra];
+      throw new ProbeError(code, result, { reads, firstIssues: reads === 1 ? observed : firstIssues, lastIssues: observed });
+    };
+    const checkField = (field) => (matches, code, result) => {
+      if (!matches) fail(code, result, [runIssue(field, run[field])]);
+    };
+
+    // An otherwise complete response can expose a title before GitHub returns
+    // the expected one. Bind this wait to the receiver identity on every read.
+    if (firstTitleMismatch || titleWaitIdentity) {
+      if (run?.id !== expected.runId || (issues.length !== 0 && !pendingTitle)) fail("RUN_PROVENANCE_INVALID");
+      checkField("status")(activeStates.has(run.status), "RUN_PROVENANCE_INVALID");
+      checkField("conclusion")(run.conclusion === null, "RUN_PROVENANCE_INVALID");
+      const { actor, created } = validateRunMetadata(run, observedAt, checkField);
+      requireReceiverActor(actor, reviewerId, checkField("actor"));
+      checkField("created_at")(created >= dispatchedAtMs - 1000, "RECEIPT_EXPIRED");
+      if (titleWaitIdentity) {
+        const changed = [];
+        if (actor.id !== titleWaitIdentity.actorId) changed.push({ field: "actor.id", kind: "mismatch" });
+        if (created !== titleWaitIdentity.created) changed.push({ field: "created_at", kind: "mismatch" });
+        if (changed.length) fail("RUN_PROVENANCE_INVALID", "FAIL", changed);
+      }
+      titleWaitIdentity ??= { actorId: actor.id, created };
+    } else if (issues.length !== 0) {
+      if (!active || issues.some(({ kind }) => kind !== "missing")) fail("RUN_PROVENANCE_INVALID");
+      validateRunMetadata(run, observedAt, checkField);
+    }
+    if (issues.length === 0) return { run: validateRun(run, { ...expected, now: observedAt }, checkField), receiverRead };
     const timeout = () => new ProbeError("RECEIVER_PROVENANCE_READ_TIMEOUT", "BLOCKED", receiverRead);
     if (reads === RECEIVER_READ_LIMIT || observedAt + READ_INTERVAL_MS > deadline) throw timeout();
     await sleep(READ_INTERVAL_MS);
@@ -229,7 +280,8 @@ export async function dispatchProbe(api, context, rawInputs, { now = Date.now, s
   const existing = await request(api, "GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts", { run_id: context.runId, per_page: 100, page: 1 });
   requireCondition(existing?.total_count === 0 && Array.isArray(existing.artifacts) && existing.artifacts.length === 0, "DISPATCH_ALREADY_RECEIPTED");
   const childInputs = { ...inputs, mode: "receive", source_run_id: String(context.runId), source_attempt: "1" };
-  const dispatchedAt = new Date(now()).toISOString();
+  const dispatchedAtMs = now();
+  const dispatchedAt = new Date(dispatchedAtMs).toISOString();
   // Exactly one write. Any uncertain response ends this attempt, never retries.
   const receiver = validateDispatchResponse(await request(api, "POST /repos/{owner}/{repo}/actions/workflows/{workflow_id}/dispatches", {
     workflow_id: "board-actor-probe.yml", ref: "main", inputs: childInputs,
@@ -237,7 +289,7 @@ export async function dispatchProbe(api, context, rawInputs, { now = Date.now, s
   const { run: child, receiverRead } = await readDispatchedRun(api, {
     runId: receiver.id, workflowId: snapshot.workflowId, repositoryId: context.repositoryId,
     fixedSha: inputs.fixed_sha, mode: "receive", probeId: inputs.probe_id,
-  }, { now, sleep });
+  }, { now, sleep, dispatchedAtMs, reviewerId: snapshot.environment.reviewer.id });
   const receipt = { schema: "board-actor-dispatch-receipt:v1", repository: REPOSITORY, repositoryId: context.repositoryId,
     probeId: inputs.probe_id, fixedSha: inputs.fixed_sha, source: snapshot.run, receiver: { ...receiver, run: child },
     inputs: childInputs, environment: snapshot.environment, dispatchedAt };
@@ -344,7 +396,7 @@ async function receive(api, context, inputs, { now, sleep, wait }) {
       requireCondition(Date.parse(metadata.expires_at) > now(), "ARTIFACT_EXPIRED_DURING_DOWNLOAD");
       const receipt = parseReceiptArchive(archive, metadata.digest);
       validateReceipt(receipt, snapshot, source, inputs, now());
-      requireCondition(snapshot.run.actor.type === "Bot" && snapshot.run.actor.login === "github-actions[bot]" && snapshot.run.actor.id !== snapshot.environment.reviewer.id, "RECEIVER_ACTOR_UNPROVEN", "BLOCKED");
+      requireReceiverActor(snapshot.run.actor, snapshot.environment.reviewer.id);
       return { snapshot, source, artifact: { id: metadata.id, digest: metadata.digest, bytes: metadata.size_in_bytes }, receipt };
     }
     requireCondition(sourceData.status !== "completed", "COMPLETED_SOURCE_RECEIPT_MISSING", "BLOCKED");

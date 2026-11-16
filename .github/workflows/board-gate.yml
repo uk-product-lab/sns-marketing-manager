@@ -1,0 +1,281 @@
+name: Board gate approval and status publication
+run-name: board-gate:${{ inputs.gate_id }}
+
+# Receiver of the scheduled independent review (TASK-0013). Only the run that the
+# scheduled workflow starts with the built-in token is accepted; a run started by
+# a person stops in the first job, before any checkout and before the Environment.
+on:
+  workflow_dispatch:
+    inputs:
+      gate_id:
+        description: Gate ID of the attestation selected by the scheduled review
+        type: string
+        required: true
+      pull_request:
+        description: Pull request number selected by the scheduled review
+        type: string
+        required: true
+      fixed_sha:
+        description: Reviewed pull request head commit SHA
+        type: string
+        required: true
+      base_sha:
+        description: Pull request base SHA, equal to the current main commit
+        type: string
+        required: true
+      evidence_branch:
+        description: review-evidence/<gate ID>
+        type: string
+        required: true
+      evidence_commit_sha:
+        description: Commit SHA of the evidence branch
+        type: string
+        required: true
+      evidence_sha256:
+        description: Recomputed SHA-256 digest of the evidence files
+        type: string
+        required: true
+      source_run_id:
+        description: Run ID of the scheduled review that dispatched this run
+        type: string
+        required: true
+      source_attempt:
+        description: Attempt of the scheduled review; only 1 is accepted
+        type: string
+        required: true
+
+permissions: {}
+
+concurrency:
+  group: board-gate-${{ inputs.gate_id }}
+  cancel-in-progress: false
+
+env:
+  GATE_REPOSITORY_ID: ${{ github.repository_id }}
+  GATE_RUN_ATTEMPT: ${{ github.run_attempt }}
+  GATE_WORKFLOW_REF: ${{ github.workflow_ref }}
+  GATE_WORKFLOW_SHA: ${{ github.workflow_sha }}
+  GATE_ACTOR_ID: ${{ github.actor_id }}
+  GATE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+
+jobs:
+  boundary:
+    name: review/board-boundary
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Reject any start that is not the built-in token dispatch, before checkout and Environment
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          retries: 0
+          script: |
+            const BOT = 'github-actions[bot]', REVIEWER = 'ukyo-0001';
+            const REPOSITORY = 'uk-product-lab/sns-marketing-manager';
+            const keys = ['gate_id', 'pull_request', 'fixed_sha', 'base_sha', 'evidence_branch',
+              'evidence_commit_sha', 'evidence_sha256', 'source_run_id', 'source_attempt'];
+            let checks = null;
+            try {
+              // Context and payload are judged before any API read. Diagnostics cannot authorize a run.
+              const inputs = context.payload.inputs;
+              const shaped = Boolean(inputs) && typeof inputs === 'object' && !Array.isArray(inputs);
+              const names = shaped ? Object.keys(inputs) : [];
+              const text = (key) => (shaped && typeof inputs[key] === 'string' ? inputs[key] : '');
+              const sha = (key) => /^[a-f0-9]{40}$/.test(text(key));
+              checks = {
+                EVENT_NAME_MISMATCH: context.eventName === 'workflow_dispatch',
+                REPOSITORY_MISMATCH: `${context.repo.owner}/${context.repo.repo}` === REPOSITORY,
+                REF_MISMATCH: context.ref === 'refs/heads/main',
+                RUN_ATTEMPT_MISMATCH: process.env.GATE_RUN_ATTEMPT === '1',
+                WORKFLOW_REF_MISMATCH: process.env.GATE_WORKFLOW_REF === `${REPOSITORY}/.github/workflows/board-gate.yml@refs/heads/main`,
+                WORKFLOW_SHA_CONTEXT_MISMATCH: process.env.GATE_WORKFLOW_SHA === context.sha,
+                ACTOR_NOT_ACTIONS_BOT: context.actor === BOT,
+                TRIGGERING_ACTOR_NOT_ACTIONS_BOT: process.env.GATE_TRIGGERING_ACTOR === BOT,
+                INPUT_KEYS_MISMATCH: names.length === keys.length && keys.every((key) => names.includes(key) && typeof inputs[key] === 'string'),
+                GATE_ID_INVALID: /^[A-Za-z0-9][A-Za-z0-9_-]{2,79}$/.test(text('gate_id')),
+                PULL_REQUEST_INVALID: /^[1-9][0-9]{0,15}$/.test(text('pull_request')),
+                SHA_FORMAT_INVALID: sha('fixed_sha') && sha('base_sha') && sha('evidence_commit_sha') && /^[a-f0-9]{64}$/.test(text('evidence_sha256')),
+                BASE_SHA_CONTEXT_MISMATCH: text('base_sha') === context.sha,
+                EVIDENCE_BRANCH_MISMATCH: text('evidence_branch') === `review-evidence/${text('gate_id')}`,
+                SOURCE_INPUT_INVALID: /^[1-9][0-9]{0,15}$/.test(text('source_run_id')) && text('source_attempt') === '1' &&
+                  text('source_run_id') !== String(context.runId),
+              };
+            } catch {
+              checks = null; // Never include an arbitrary evaluation error or its input in the log.
+            }
+            const reasons = checks === null ? ['BOUNDARY_EVALUATION_UNAVAILABLE'] : Object.keys(checks).filter((code) => checks[code] !== true);
+            if (reasons.length > 0) {
+              try {
+                // Static reason codes only: no input value, key name, ref or SHA.
+                core.error('GATE_BOUNDARY_DIAGNOSTIC ' + JSON.stringify({ schema: 'board-gate-boundary-diagnostic:v1', reasons }));
+              } catch {
+                // A failed log sink must still end in the fixed rejection below.
+              }
+              throw new Error('GATE_CONTEXT_REJECTED');
+            }
+            const read = async (route, parameters, code) => {
+              const response = await github.request(route, {
+                owner: 'uk-product-lab', repo: 'sns-marketing-manager', ...parameters,
+                headers: { accept: 'application/vnd.github+json', 'X-GitHub-Api-Version': '2026-03-10' },
+              }).catch(() => { throw new Error(code + '_READ_BLOCKED'); });
+              if (response?.status !== 200) throw new Error(code + '_READ_BLOCKED');
+              return response.data;
+            };
+            const main = await read('GET /repos/{owner}/{repo}/branches/{branch}', { branch: 'main' }, 'GATE_MAIN');
+            if (main?.name !== 'main' || main.commit?.sha !== context.sha) throw new Error('GATE_MAIN_CHANGED');
+            // The recorded run must name the Actions bot as actor and triggering actor.
+            const run = await read('GET /repos/{owner}/{repo}/actions/runs/{run_id}', { run_id: context.runId }, 'GATE_RUN');
+            const isBot = (value) => value?.login === BOT && value.type === 'Bot' && Number.isSafeInteger(value.id) && value.id > 0;
+            if (run?.id !== context.runId || run.event !== 'workflow_dispatch' || run.run_attempt !== 1 ||
+              !isBot(run.actor) || !isBot(run.triggering_actor) || run.actor.id !== run.triggering_actor.id ||
+              String(run.actor.id) !== process.env.GATE_ACTOR_ID) throw new Error('GATE_ACTOR_REJECTED');
+            // The bot must be a different identity from the single board reviewer.
+            const environment = await read('GET /repos/{owner}/{repo}/environments/{environment_name}', { environment_name: 'board-review' }, 'GATE_ENVIRONMENT');
+            const rules = Array.isArray(environment?.protection_rules)
+              ? environment.protection_rules.filter((rule) => rule?.type === 'required_reviewers') : [];
+            const reviewers = rules.length === 1 && Array.isArray(rules[0].reviewers) ? rules[0].reviewers : [];
+            const reviewer = reviewers.length === 1 && reviewers[0]?.type === 'User' ? reviewers[0].reviewer : null;
+            if (rules[0]?.prevent_self_review !== true || reviewer?.login !== REVIEWER || !Number.isSafeInteger(reviewer.id) ||
+              reviewer.id <= 0 || reviewer.id === run.actor.id) throw new Error('GATE_REVIEWER_UNPROVEN');
+
+  preflight:
+    name: review/board-preflight
+    needs: boundary
+    if: ${{ github.repository == 'uk-product-lab/sns-marketing-manager' && github.ref == 'refs/heads/main' && github.run_attempt == 1 && github.actor == 'github-actions[bot]' && github.triggering_actor == 'github-actions[bot]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      verified: ${{ steps.guard.outputs.verified }}
+      environment: ${{ steps.guard.outputs.environment }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: harness/scripts
+          persist-credentials: false
+      - name: Bind this run to the scheduled review and its receipt; READ board-review before scheduling
+        id: guard
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          GATE_READ_TOKEN: ${{ github.token }}
+        with:
+          retries: 0
+          script: |
+            const gate = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-gate.mjs`);
+            const result = await gate.runBoardGateStage('guard', {
+              api: gate.createRuntimeApi(github, process.env.GATE_READ_TOKEN), context: gate.runtimeContext(context, process.env),
+              inputs: context.payload.inputs, root: 'gate-preflight',
+            });
+            core.setOutput('environment', JSON.stringify(result.snapshot.environment));
+            core.setOutput('verified', 'true');
+      - name: Bound preflight allocation
+        id: budget
+        if: ${{ always() }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const gate = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-gate.mjs`);
+            await gate.gateUploadBudget('gate-preflight/observation');
+      - name: Preserve first preflight outcome
+        if: ${{ always() && steps.budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: board-gate-preflight-${{ github.run_id }}-1
+          path: gate-preflight/observation/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 1
+
+  board:
+    name: review/board-gate
+    needs: preflight
+    # A re-run of this job alone keeps the outputs of the earlier attempt, so the
+    # Environment is reached only on attempt 1 of the bot-started run, like preflight.
+    if: ${{ needs.preflight.outputs.verified == 'true' && github.repository == 'uk-product-lab/sns-marketing-manager' && github.ref == 'refs/heads/main' && github.run_attempt == 1 && github.actor == 'github-actions[bot]' && github.triggering_actor == 'github-actions[bot]' }}
+    environment:
+      name: board-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      issues: write
+    steps:
+      # Trusted main harness only. This job never checks out or runs pull request code.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: harness/scripts
+          persist-credentials: false
+      - name: Recheck provenance, receipt, PR and evidence binding, Environment and approval history
+        id: recheck
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          GATE_READ_TOKEN: ${{ github.token }}
+          GATE_EXPECTED_ENVIRONMENT: ${{ needs.preflight.outputs.environment }}
+        with:
+          retries: 0
+          script: |
+            const gate = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-gate.mjs`);
+            const release = await gate.runBoardGateStage('protected', {
+              api: gate.createRuntimeApi(github, process.env.GATE_READ_TOKEN), context: gate.runtimeContext(context, process.env),
+              inputs: context.payload.inputs, expectedEnvironment: JSON.parse(process.env.GATE_EXPECTED_ENVIRONMENT), root: 'gate-board',
+            });
+            core.setOutput('release', JSON.stringify(release));
+      - name: Create dedicated Gatekeeper App token
+        id: gatekeeper
+        uses: actions/create-github-app-token@67018539274d69449ef7c02e8e71183d1719ab42 # v2.1.4
+        with:
+          app-id: ${{ vars.GATEKEEPER_APP_ID }}
+          private-key: ${{ secrets.GATEKEEPER_APP_PRIVATE_KEY }}
+      - name: Publish seven Gatekeeper App statuses
+        id: publish
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          GATE_RELEASE: ${{ steps.recheck.outputs.release }}
+        with:
+          github-token: ${{ steps.gatekeeper.outputs.token }}
+          retries: 0
+          script: |
+            const gate = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-gate.mjs`);
+            const published = await gate.runBoardGateStage('publish', {
+              api: gate.createRuntimeApi(github), context: gate.runtimeContext(context, process.env),
+              inputs: context.payload.inputs, release: JSON.parse(process.env.GATE_RELEASE), root: 'gate-board',
+            });
+            core.setOutput('published', JSON.stringify(published));
+      - name: Mark review approved
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          GATE_PUBLISHED: ${{ steps.publish.outputs.published }}
+        with:
+          retries: 0
+          script: |
+            const gate = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-gate.mjs`);
+            await gate.runBoardGateStage('label', {
+              api: gate.createRuntimeApi(github), context: gate.runtimeContext(context, process.env),
+              inputs: context.payload.inputs, published: JSON.parse(process.env.GATE_PUBLISHED), root: 'gate-board',
+            });
+      - name: Bound board allocation
+        id: budget
+        if: ${{ always() }}
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        with:
+          script: |
+            const gate = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-gate.mjs`);
+            await gate.gateUploadBudget('gate-board/observation');
+      - name: Preserve recheck, publication and label outcomes
+        if: ${{ always() && steps.budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: board-gate-outcome-${{ github.run_id }}-1
+          path: gate-board/observation/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 1

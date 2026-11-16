@@ -1,6 +1,6 @@
 # GitHub強制契約
 
-更新日: 2026-09-16
+更新日: 2026-11-16
 現行モデル: `shared-admin`（DEC-009）。変更作業の範囲: DEC-010 / TASK-0001。
 
 ## 身元と権限の扱い
@@ -42,7 +42,18 @@ mainに上記7件を厳密に設定し、expected sourceを専用App IDに固定
 
 `board-review` Environmentには `ukyo-0001` 1名だけをrequired reviewerとして設定し、管理者bypass禁止・main限定・自己承認防止を維持する。今回の整備は設定変更を含まない。
 
-同一IDがworkflowの実行actorの場合、自己承認防止により本人も承認できない。scheduleにもactorがあるため、定期起動を別主体とみなさない。実runのactor・trigger・固定SHA・本人承認・status発行をまとめて検証する。衝突時はDEC-012へ判断材料を追加し、設定を無断で解除しない。PR自己承認へ置き換えて解決したともみなさない。
+同一IDがworkflowの実行actorの場合、自己承認防止により本人も承認できない。scheduleにもactorがあるため、定期起動を別主体とみなさない。このため保護jobを定期workflowから分ける（DEC-050、TASK-0013）。自己承認防止の解除、PR自己承認への置き換え、別machine accountの導入では解決しない。
+
+- 親（`independent-review.yml`、schedule）: 選定・attestation検証・ラベル遷移と、秘密なしの信頼済み再検証まで。Environment、App鍵、status発行を持たない。両方が成功したattempt 1だけが、組込みtokenで子を一度だけ `workflow_dispatch` する。`actions: write` はこの起動jobだけに与える。起動の200応答（run IDとURL）を厳密に照合し、親子を結ぶreceiptを単一の不変artifactとして残す。不明な応答では再起動・rerun・cancelをしない。
+- 子（`board-gate.yml`、`workflow_dispatch` のみ）: 最初のjobがcheckoutとEnvironmentより前に、対象repository・`refs/heads/main`・現在のmain SHA・attempt 1・既知の入力と、actorおよびtriggering actorが `github-actions[bot]`（Bot、reviewerと異なるID）であることを確認する。preflightと保護jobのスケジュール条件も、attempt 1と、actor・triggering actorが `github-actions[bot]` であることを要求する。本人・第三者の直接起動と、re-run（全体、失敗jobのみ、保護jobのみ）は承認待ちへ進まない。
+- preflight: 親runのworkflow ID・path・main・現在のSHA・attempt 1・schedule event・選定と再検証jobの成功、receiptの所属・digest・内容（PR番号、固定SHA、base SHA、gate ID、証跡branch/commit/digest、子run）と1時間の期限、同じgate IDの重複起動がないこと、`board-review` の設定をREADで照合する。不一致・欠落・重複・期限切れでは保護jobをスケジュールしない。
+- 保護job（`board-review`）: 承認後の別runnerで、親run・receipt・PR head・base・最新main包含・`review:board-pending`・証跡branch・Environment設定・当該runの承認履歴（本人IDの承認1件）を再照合する。合格後にだけGatekeeper App tokenを作り、固定SHAへ7 statusを発行し、その全件成功後に `review:approved` へ遷移する。App鍵を参照するのはこのjobだけで、PRコードをcheckout・実行しない。部分発行の後は再試行も成功ラベルの付与もしない。
+
+却下、未承認、1時間の期限切れ、親の失敗、stale SHA、証跡改変、別PRのreceipt流用、重複起動、attempt 2、別ref、fork由来では、statusを1件も発行せず `review:approved` も付けない。その後は `review:board-pending` を本人が手動解除し、新しいgate IDで再提出する。
+
+設定のREADと保護jobのスケジュール、最終照合とstatus発行は原子的ではない。管理者がその間に設定を変えられる以上、管理者からの完全な隔離は保証しない。承認者のIDと履歴の照合は「許可されたID」の確認であり、人間本人が操作したことの証明ではない。
+
+`board-gate.yml` の裏付けは、合成したAPI応答と時計によるローカル検証だけである。鍵なしprobe（`harness/board-actor-probe.md`）は別のworkflowであり、その結果をこのworkflowの実run成功として扱わない。bot actorでの本人承認、App tokenによる発行、保護有効化後の拒否は、App作成・保護設定の後続工程で正負の試験を行う。実runのactor・trigger・固定SHA・本人承認・status発行をまとめて検証するまで `REPOSITORY_GATE_PASS` を記録しない。
 
 公式仕様:
 - https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/review-deployments

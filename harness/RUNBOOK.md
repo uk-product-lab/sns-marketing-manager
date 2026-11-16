@@ -1,6 +1,6 @@
 # 自律開発ランブック
 
-更新日: 2026-09-18
+更新日: 2026-11-16
 
 ## 現行方針と再開地点
 
@@ -188,9 +188,17 @@ node harness/scripts/submit-independent-review.mjs \
   --automation-login <automation ID>
 ```
 
-定期workflowがattestationを選ぶと、対象PRが現在の既定ブランチをbaseにし、headがその最新commitを含むことを再検査してから、GitHub上の証跡commitの全ファイルを取得してdigestを再計算する。続いて秘密情報のない別jobが同じbase結合を再検査し、信頼済み既定ブランチHarnessから品質ゲートを再実行する。ここまで合格した場合だけ`board-review` Environmentで取締役会承認待ちになる。最大15分程度の待ち時間を見込む。取締役会代表本人が固定SHA、証跡commit、再計算済みdigest、再実行結果、スクリーンショット、ログを確認し、手動承認する。承認後の新しいrunnerはPRコードを実行せず、status発行直前にbase結合をもう一度確認し、Environment秘密鍵から作ったGatekeeper App tokenで7 statusを発行する。expected sourceがGatekeeper Appに固定された7チェックが同じPR head SHAへ成功した場合だけマージする。
+定期workflow（`independent-review.yml`、以下「親」）がattestationを選ぶと、対象PRが現在の既定ブランチをbaseにし、headがその最新commitを含むことを再検査してから、GitHub上の証跡commitの全ファイルを取得してdigestを再計算する。続いて秘密情報のない別jobが同じbase結合を再検査し、信頼済み既定ブランチHarnessから品質ゲートを再実行する。親は`board-review` EnvironmentもApp鍵も使わない（DEC-050、TASK-0013）。定期runの実行actorは本人（`ukyo-0001`）になり、自己承認防止により同じrun内の保護jobを本人が承認できないためである。
 
-承認待ち中にPR headまたは証跡branchが変わると、次の定期実行が`review:board-pending`を外して`review:stale`にする。新しい固定SHA・新しいgate IDで全必須テストからやり直す。取締役会がEnvironmentを却下した場合は`review:board-pending`を手動解除して理由をPRへ残し、修正後に新しいgate IDで再提出する。
+選定と再検証の両方が成功した親（attempt 1）だけが、組込みtokenで子workflow（`board-gate.yml`）を一度だけ起動する。起動の前に、現在のmain、`board-review`の設定、PRのhead・base・`review:board-pending`、証跡branch、同じgate IDの子runがないことを確認する。起動の200応答が返すrun IDとURLを厳密に照合し、子runの来歴を確認してから、親子を結ぶreceiptを親runの単一artifact（保持1日、上書き不可）として残す。応答が不明または不正な場合は、再起動・rerun・cancelをせずに停止する。
+
+子は`workflow_dispatch`でだけ動く。最初のjobはcheckoutもEnvironmentも使わず、対象repository、`refs/heads/main`、現在のmain SHA、attempt 1、既知の入力、そしてactorとtriggering actorがともに`github-actions[bot]`（Bot、reviewerと異なるID）であることを確認する。本人や第三者による子の直接起動はここで停止する。preflightと保護jobも、attempt 1で、actorとtriggering actorが`github-actions[bot]`の場合にだけスケジュールされる。このためre-runは、全体・失敗jobのみ・保護jobのみのどの形でも承認待ちへ進まない。次のpreflightは、親runが同じrepositoryの`independent-review.yml`（schedule起動、main、現在のSHA、attempt 1）で選定と再検証のjobが成功していること、receiptが親runの単一artifactで、gate ID・PR番号・固定SHA・base SHA・証跡branch/commit/digest・子run自身と一致し、起動から1時間以内であることを照合し、`board-review`の設定（本人1名、自己承認防止、管理者bypass禁止、main限定）をREADする。ここまで合格した場合だけ`board-review` Environmentで取締役会承認待ちになる。
+
+待ち時間は、定期起動の間隔（最大15分程度）に親の再検証の所要時間を加えて見込む。子のpreflightは親runの終了とreceiptを最大120秒待つ。承認の期限は子runの起動から1時間である。取締役会代表本人が、子runのpreflight記録（gate ID、PR、固定SHA、証跡commit、digest）、親runの再実行結果、証跡のスクリーンショットとログを確認し、手動承認する。承認後の新しいrunnerは信頼済みmainのHarnessだけをcheckoutし、PRコードを実行しない。親run・receipt・PR head・base・最新main包含・`review:board-pending`・証跡branch・`board-review`設定・当該runの承認履歴（本人IDの承認1件）を再照合してから、Environment秘密鍵でGatekeeper App tokenを作り、固定SHAへ7 statusを発行する（targetは子run）。7件すべての発行後にだけ`review:board-pending`を`review:approved`へ替える。途中で失敗した場合は再試行せず、成功ラベルを付けない。expected sourceがGatekeeper Appに固定された7チェックが同じPR head SHAへ成功した場合だけマージする。
+
+承認待ち中にPR headまたは証跡branchが変わると、次の定期実行が`review:board-pending`を外して`review:stale`にし、子は承認されてもstatusを発行しない。新しい固定SHA・新しいgate IDで全必須テストからやり直す。取締役会がEnvironmentを却下した場合、承認が期限の1時間を超えた場合、親の起動または子の検査が停止した場合は、statusも`review:approved`も付かない。同じrunを再実行せず、`review:board-pending`を手動解除して理由をPRへ残し、新しいgate IDで再提出する。自動解除は行わない。
+
+この構成はDEC-050による。鍵なしprobe（`harness/board-actor-probe.md`）が対象にしたのは、bot起動の子runを本人が承認する経路までである。`board-gate.yml`の実run、Gatekeeper App tokenの発行、main保護を有効にした後の挙動は未実施で、App作成・保護設定の後続工程で実証する。ローカル検証の合格をその証明にしない。
 
 ## 6. マージ後
 

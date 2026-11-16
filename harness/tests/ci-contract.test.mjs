@@ -385,14 +385,19 @@ test("workflow trust, runtime, real commands, seven statuses and board isolation
   const quality = await readFile(join(projectRoot, ".github/workflows/quality-gates.yml"), "utf8");
   const independent = await readFile(join(projectRoot, ".github/workflows/independent-review.yml"), "utf8");
   const smoke = await readFile(join(projectRoot, ".github/workflows/post-merge-smoke.yml"), "utf8");
+  // TASK-0013: the Environment job, the App key and the seven statuses moved from the scheduled workflow to the bot-dispatched board gate.
+  const gate = await readFile(join(projectRoot, ".github/workflows/board-gate.yml"), "utf8");
+  const gateHelper = await readFile(join(projectRoot, "harness/scripts/board-gate.mjs"), "utf8");
   for (const text of [quality, independent, smoke]) { assert.match(text, /node-version: 24\.15\.0/); assert.match(text, /npm@11\.12\.1/); assert.match(text, /package-manager-cache: false/); assert.match(text, /retention-days: 1/); assert.doesNotMatch(text, /npm run test:(?:migrate|e2e:chromium|e2e:webkit-mobile|a11y)\b/); }
   for (const text of [quality, independent, smoke]) { assert.match(text, /actions\/setup-python@83679a892e2d95755f2dac6acb0bfd1e9ac5d548/); assert.match(text, /python-version: 3\.12\.14/); assert.doesNotMatch(text, /^\s+cache: /m); }
-  const verify = independent.split("  verify:")[1].split("  board:")[0];
+  assert.equal(independent.split("\n  dispatch:\n").length, 2); assert.doesNotMatch(independent, /^  board:/m);
+  const verify = independent.split("  verify:")[1].split("\n  dispatch:\n")[0];
   assert.match(verify, /node trusted\/harness\/scripts\/ci-quality.mjs/); assert.doesNotMatch(verify, /secrets\.|: write|github-token:/);
   assert.equal((verify.match(/persist-credentials: false/g) ?? []).length, 2);
   assert.equal((quality.match(/persist-credentials: false/g) ?? []).length, 2);
-  assert.match(independent, /name: board-review/); assert.match(independent, /secrets.GATEKEEPER_APP_PRIVATE_KEY/);
-  const contexts = independent.split("const contexts = [")[1].split("];", 1)[0];
+  assert.match(gate, /environment:\n      name: board-review/); assert.match(gate, /secrets.GATEKEEPER_APP_PRIVATE_KEY/);
+  assert.doesNotMatch(independent, /environment:|secrets\.|GATEKEEPER|createCommitStatus/); assert.doesNotMatch(gate, /: write(?<!issues: write)/);
+  const contexts = gateHelper.split("export const STATUS_CONTEXTS = [")[1].split("];", 1)[0];
   assert.equal((contexts.match(/"(?:governance|quality|review)\//g) ?? []).length, 7);
   assert.doesNotMatch(quality, /secrets\.|: write/);
   const runner = await readFile(join(projectRoot, "harness/scripts/ci-quality.mjs"), "utf8");

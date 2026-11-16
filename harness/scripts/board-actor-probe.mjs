@@ -24,8 +24,8 @@ const shaPattern = /^[a-f0-9]{40}$/;
 const uuidPattern = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const workflowRef = `${REPOSITORY}/${WORKFLOW}@refs/heads/main`;
 const runTitlePrefix = "board-actor-probe:";
-const activeStates = new Set(["queued", "in_progress", "waiting", "pending", "requested"]);
-const positiveId = (value) => Number.isSafeInteger(value) && value > 0;
+export const activeStates = new Set(["queued", "in_progress", "waiting", "pending", "requested"]);
+export const positiveId = (value) => Number.isSafeInteger(value) && value > 0;
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const sleepForRead = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -37,24 +37,24 @@ export class ProbeError extends Error {
     if (receiverRead) this.receiverRead = receiverRead;
   }
 }
-function requireCondition(condition, code, result) { if (!condition) throw new ProbeError(code, result); }
-function exactKeys(value, keys, code) {
+export function requireCondition(condition, code, result) { if (!condition) throw new ProbeError(code, result); }
+export function exactKeys(value, keys, code) {
   requireCondition(value && typeof value === "object" && !Array.isArray(value) &&
     JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort()), code);
 }
-function timestamp(value, code, check = requireCondition) {
+export function timestamp(value, code, check = requireCondition) {
   check(typeof value === "string" && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/.test(value) && Number.isFinite(Date.parse(value)), code);
   const canonical = new Date(Date.parse(value)).toISOString();
   check(canonical === value || canonical.replace(".000Z", "Z") === value, code);
   return Date.parse(value);
 }
-function identity(value, check = requireCondition) {
+export function identity(value, check = requireCondition) {
   check(value && positiveId(value.id) && typeof value.login === "string" &&
     /^[a-zA-Z0-9][a-zA-Z0-9[\]-]{0,60}$/.test(value.login) && ["User", "Bot"].includes(value.type), "RUN_IDENTITY_INVALID");
   return { login: value.login, id: value.id, type: value.type };
 }
 function runTitle(mode, probeId) { return `${runTitlePrefix}${mode}:${probeId}`; }
-function requireReceiverActor(actor, reviewerId, check = requireCondition) {
+export function requireReceiverActor(actor, reviewerId, check = requireCondition) {
   check(actor.type === "Bot" && actor.login === "github-actions[bot]" && actor.id !== reviewerId,
     "RECEIVER_ACTOR_UNPROVEN", "BLOCKED");
 }
@@ -85,7 +85,7 @@ export function runtimeContext(context, env) {
   };
 }
 
-async function request(api, route, parameters = {}) {
+export async function request(api, route, parameters = {}) {
   let response;
   try { response = await api.request(route, { owner: "uk-product-lab", repo: "sns-marketing-manager", ...parameters,
     headers: { accept: "application/vnd.github+json", "X-GitHub-Api-Version": API_VERSION } }); }
@@ -115,14 +115,15 @@ function runIssue(field, value) {
   return { field, kind: value == null || (field === "display_title" && value === "") ? "missing" : "mismatch" };
 }
 
-function runProvenanceIssues(run, { runId, workflowId, repositoryId, fixedSha, mode, probeId }) {
+function runProvenanceIssues(run, { runId, workflowId, repositoryId, fixedSha, mode, probeId,
+  workflowPath = WORKFLOW, event: expectedEvent = "workflow_dispatch", title = runTitle(mode, probeId) }) {
   const { id, workflow_id, path, event, head_branch, head_sha, run_attempt,
     repository, head_repository, html_url, url, display_title } = run ?? {};
   const checks = [
     ["id", id, id === runId && positiveId(runId)],
     ["workflow_id", workflow_id, workflow_id === workflowId],
-    ["path", path, [WORKFLOW, `${WORKFLOW}@main`, `${WORKFLOW}@refs/heads/main`].includes(path)],
-    ["event", event, event === "workflow_dispatch"],
+    ["path", path, [workflowPath, `${workflowPath}@main`, `${workflowPath}@refs/heads/main`].includes(path)],
+    ["event", event, event === expectedEvent],
     ["head_branch", head_branch, head_branch === "main"],
     ["head_sha", head_sha, head_sha === fixedSha],
     ["run_attempt", run_attempt, run_attempt === 1],
@@ -130,15 +131,16 @@ function runProvenanceIssues(run, { runId, workflowId, repositoryId, fixedSha, m
     ["head_repository", head_repository, head_repository?.id === repositoryId && head_repository?.full_name === REPOSITORY],
     ["html_url", html_url, html_url === `https://github.com/${REPOSITORY}/actions/runs/${runId}`],
     ["url", url, url === `https://api.github.com/repos/${REPOSITORY}/actions/runs/${runId}`],
-    ["display_title", display_title, display_title === runTitle(mode, probeId)],
+    // A null title is for a run without a run-name, such as a scheduled run.
+    ...(title === null ? [] : [["display_title", display_title, display_title === title]]),
   ];
   return checks.filter(([, , matches]) => !matches).map(([field, value]) => runIssue(field, value));
 }
 
-function validateRunMetadata(run, now, checkField = () => requireCondition) {
+function validateRunMetadata(run, now, checkField = () => requireCondition, maxAgeMs = RECEIPT_TTL_MS) {
   const checkCreatedAt = checkField("created_at");
   const created = timestamp(run.created_at, "RUN_TIME_INVALID", checkCreatedAt);
-  checkCreatedAt(created <= now && now - created <= RECEIPT_TTL_MS, "RUN_EXPIRED");
+  checkCreatedAt(created <= now && now - created <= maxAgeMs, "RUN_EXPIRED");
   const actor = identity(run.actor, checkField("actor"));
   const checkTriggeringActor = checkField("triggering_actor");
   const triggeringActor = identity(run.triggering_actor, checkTriggeringActor);
@@ -149,19 +151,19 @@ function validateRunMetadata(run, now, checkField = () => requireCondition) {
   return { actor, triggeringActor, created };
 }
 
-function validateRun(run, expected, checkField) {
+export function validateRun(run, expected, checkField) {
   const { runId, workflowId, repositoryId, fixedSha, mode, now } = expected;
   requireCondition(runProvenanceIssues(run, expected).length === 0, "RUN_PROVENANCE_INVALID");
-  const { actor, triggeringActor } = validateRunMetadata(run, now, checkField);
-  return { id: runId, attempt: 1, mode, workflowId, workflowRef, workflowSha: fixedSha, ref: "refs/heads/main", sha: fixedSha,
+  const { actor, triggeringActor } = validateRunMetadata(run, now, checkField, expected.maxAgeMs);
+  return { id: runId, attempt: 1, mode, workflowId, workflowRef: expected.workflowRef ?? workflowRef, workflowSha: fixedSha, ref: "refs/heads/main", sha: fixedSha,
     repositoryId, actor, triggeringActor, createdAt: run.created_at, htmlUrl: run.html_url };
 }
 
-async function duplicateGuard(api, snapshot, inputs) {
+export async function listDispatchRuns(api, workflowId, filters = {}) {
   let total = null, runs = [];
   for (let page = 1; page <= 10; page++) {
     const data = await request(api, "GET /repos/{owner}/{repo}/actions/workflows/{workflow_id}/runs", {
-      workflow_id: snapshot.workflowId, event: "workflow_dispatch", per_page: 100, page,
+      workflow_id: workflowId, event: "workflow_dispatch", ...filters, per_page: 100, page,
     });
     requireCondition(Number.isSafeInteger(data?.total_count) && data.total_count >= 0 && data.total_count <= 1000 && Array.isArray(data.workflow_runs), "RUN_LIST_INVALID", "BLOCKED");
     if (total === null) total = data.total_count;
@@ -172,6 +174,11 @@ async function duplicateGuard(api, snapshot, inputs) {
   }
   requireCondition(runs.every((item) => item && positiveId(item.id) && typeof item.display_title === "string"), "RUN_LIST_INVALID", "BLOCKED");
   requireCondition(runs.length === total && new Set(runs.map((item) => item.id)).size === runs.length, "RUN_LIST_INCOMPLETE", "BLOCKED");
+  return runs;
+}
+
+async function duplicateGuard(api, snapshot, inputs) {
+  const runs = await listDispatchRuns(api, snapshot.workflowId);
   // One UUID owns either one negative run or one dispatch/current-receiver pair.
   // Include unknown phases too: a malformed prior phase cannot release its UUID.
   const same = runs.filter((item) => item.display_title.startsWith(runTitlePrefix) && item.display_title.endsWith(`:${inputs.probe_id}`));
@@ -211,13 +218,13 @@ export function validateDispatchResponse(data, sourceRunId) {
   return { id, apiUrl: data.run_url, htmlUrl: data.html_url };
 }
 
-function titleMayBePending(run, issues) {
+function titleMayBePending(run, issues, prefix = runTitlePrefix) {
   if (issues.length !== 1 || issues[0].field !== "display_title") return false;
   return issues[0].kind === "missing" || (typeof run.display_title === "string" &&
-    !run.display_title.trimStart().toLowerCase().startsWith(runTitlePrefix));
+    !run.display_title.trimStart().toLowerCase().startsWith(prefix));
 }
 
-async function readDispatchedRun(api, expected, { now, sleep, dispatchedAtMs, reviewerId }) {
+export async function readDispatchedRun(api, expected, { now, sleep, dispatchedAtMs, reviewerId }) {
   const deadline = now() + RECEIVER_READ_WINDOW_MS;
   let firstIssues = [], lastIssues = [], titleWaitIdentity;
   for (let reads = 1; ; reads++) {
@@ -234,7 +241,7 @@ async function readDispatchedRun(api, expected, { now, sleep, dispatchedAtMs, re
     const receiverRead = { reads, firstIssues, lastIssues };
     const observedAt = now();
     const active = run?.id === expected.runId && activeStates.has(run.status) && run.conclusion === null;
-    const pendingTitle = titleMayBePending(run, issues);
+    const pendingTitle = titleMayBePending(run, issues, expected.titlePrefix);
     const firstTitleMismatch = reads === 1 && pendingTitle && issues[0].kind === "mismatch";
     const fail = (code, result, extra = []) => {
       const observed = [...issues, ...extra];
@@ -345,10 +352,10 @@ export function parseReceiptArchive(buffer, digest) {
   } catch (error) { if (error instanceof ProbeError) throw error; throw new ProbeError("ARCHIVE_PARSE_INVALID"); }
 }
 
-function artifactMetadata(data, source, now) {
+export function artifactMetadata(data, source, now, name) {
   requireCondition(Number.isSafeInteger(data?.total_count) && data.total_count >= 0 && data.total_count <= 100 &&
     Array.isArray(data.artifacts) && data.artifacts.length === data.total_count, "ARTIFACT_LIST_INVALID");
-  const matches = data.artifacts.filter((item) => item.name === receiptName(source.id));
+  const matches = data.artifacts.filter((item) => item.name === (name ?? receiptName(source.id)));
   requireCondition(matches.length <= 1, "DUPLICATE_RECEIPT_REJECTED");
   if (!matches.length) return null;
   const artifact = matches[0];

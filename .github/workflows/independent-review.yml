@@ -697,116 +697,82 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  board:
-    name: review/board-gate
+  # The Environment job lives in board-gate.yml. This scheduled run only starts it
+  # once with the built-in token, so the receiver's actor is the Actions bot.
+  dispatch:
+    name: review/dispatch-board-gate
     needs: [prepare, verify]
-    if: ${{ needs.prepare.outputs.found == 'true' && needs.verify.result == 'success' }}
-    environment:
-      name: board-review
+    if: ${{ needs.prepare.outputs.found == 'true' && needs.verify.result == 'success' && github.run_attempt == 1 }}
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: read
-      issues: write
+      actions: write
       pull-requests: read
+    env:
+      GATE_REPOSITORY_ID: ${{ github.repository_id }}
+      GATE_RUN_ATTEMPT: ${{ github.run_attempt }}
+      GATE_WORKFLOW_REF: ${{ github.workflow_ref }}
+      GATE_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      GATE_ACTOR_ID: ${{ github.actor_id }}
+      GATE_TRIGGERING_ACTOR: ${{ github.triggering_actor }}
     steps:
-      - name: Final fixed-SHA and evidence binding check
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: harness/scripts
+          persist-credentials: false
+      - name: Validate selection, main and board-review; dispatch board gate once; save bound receipt
+        id: dispatch
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
+        env:
+          GATE_ID: ${{ needs.prepare.outputs.gate_id }}
+          GATE_PULL_REQUEST: ${{ needs.prepare.outputs.pull_request }}
+          GATE_FIXED_SHA: ${{ needs.prepare.outputs.fixed_sha }}
+          GATE_BASE_SHA: ${{ needs.prepare.outputs.base_sha }}
+          GATE_EVIDENCE_BRANCH: ${{ needs.prepare.outputs.evidence_branch }}
+          GATE_EVIDENCE_COMMIT_SHA: ${{ needs.prepare.outputs.evidence_commit_sha }}
+          GATE_EVIDENCE_SHA256: ${{ needs.prepare.outputs.evidence_sha256 }}
+        with:
+          retries: 0
+          script: |
+            const gate = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-gate.mjs`);
+            await gate.runBoardGateStage('dispatch', {
+              api: gate.createRuntimeApi(github), context: gate.runtimeContext(context, process.env),
+              inputs: gate.selectionFromEnv(process.env), root: 'gate-dispatch',
+            });
+      - name: Bound receipt upload allocation
+        id: receipt_budget
+        if: ${{ steps.dispatch.outcome == 'success' }}
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const prNumber = Number("${{ needs.prepare.outputs.pull_request }}");
-            const fixedSha = "${{ needs.prepare.outputs.fixed_sha }}";
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber,
-            });
-            const { data: repository } = await github.rest.repos.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-            });
-            const { data: defaultBranch } = await github.rest.repos.getBranch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              branch: repository.default_branch,
-            });
-            const comparison = await github.request(
-              "GET /repos/{owner}/{repo}/compare/{basehead}",
-              {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                basehead: `${defaultBranch.commit.sha}...${fixedSha}`,
-              }
-            );
-            if (
-              pr.head.sha !== fixedSha ||
-              pr.base.ref !== repository.default_branch ||
-              pr.base.sha !== defaultBranch.commit.sha ||
-              !["ahead", "identical"].includes(comparison.data.status)
-            ) {
-              core.setFailed(
-                "PR no longer targets or contains the current default branch"
-              );
-              return;
-            }
-            const evidenceRef = await github.rest.git.getRef({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              ref: "heads/${{ needs.prepare.outputs.evidence_branch }}",
-            });
-            if (
-              evidenceRef.data.object.sha !==
-              "${{ needs.prepare.outputs.evidence_commit_sha }}"
-            ) {
-              core.setFailed("Evidence branch changed after trusted verification");
-            }
-      - name: Create dedicated Gatekeeper App token
-        id: gatekeeper
-        uses: actions/create-github-app-token@67018539274d69449ef7c02e8e71183d1719ab42 # v2.1.4
+            const gate = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-gate.mjs`);
+            await gate.gateUploadBudget('gate-dispatch/receipt');
+      - name: Publish immutable dispatch receipt (no overwrite)
+        if: ${{ steps.receipt_budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          app-id: ${{ vars.GATEKEEPER_APP_ID }}
-          private-key: ${{ secrets.GATEKEEPER_APP_PRIVATE_KEY }}
-      - name: Publish seven Gatekeeper App statuses
-        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
-        with:
-          github-token: ${{ steps.gatekeeper.outputs.token }}
-          script: |
-            const fixedSha = "${{ needs.prepare.outputs.fixed_sha }}";
-            const contexts = [
-              "governance/protected-files",
-              "quality/static",
-              "quality/unit",
-              "quality/e2e-chromium",
-              "quality/e2e-webkit-mobile",
-              "quality/accessibility",
-              "review/independent",
-            ];
-            const targetUrl =
-              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            for (const statusContext of contexts) {
-              await github.rest.repos.createCommitStatus({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                sha: fixedSha,
-                state: "success",
-                context: statusContext,
-                description: `Gatekeeper approved ${{ needs.prepare.outputs.gate_id }}`,
-                target_url: targetUrl,
-              });
-            }
-      - name: Mark review approved
+          name: board-gate-receipt-${{ github.run_id }}-1
+          path: gate-dispatch/receipt/dispatch-receipt.json
+          if-no-files-found: error
+          overwrite: false
+          compression-level: 0
+          retention-days: 1
+      - name: Bound dispatch observation allocation
+        id: observation_budget
+        if: ${{ always() }}
         uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7.0.1
         with:
           script: |
-            const prNumber = Number("${{ needs.prepare.outputs.pull_request }}");
-            await github.rest.issues.removeLabel({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              name: "review:board-pending",
-            });
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: prNumber,
-              labels: ["review:approved"],
-            });
+            const gate = await import(`${process.env.GITHUB_WORKSPACE}/harness/scripts/board-gate.mjs`);
+            await gate.gateUploadBudget('gate-dispatch/observation');
+      - name: Preserve first dispatch outcome
+        if: ${{ always() && steps.observation_budget.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: board-gate-dispatch-observation-${{ github.run_id }}-1
+          path: gate-dispatch/observation/
+          if-no-files-found: error
+          overwrite: false
+          retention-days: 1

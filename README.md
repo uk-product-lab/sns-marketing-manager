@@ -42,6 +42,7 @@ MVPでは媒体別原稿、画像スライド、短尺動画、投稿予定、�
 - GitHubにはViteのスターターアプリを配置済み。SNS管理機能はこれから実装する。
 - ローカル開発ハーネス: 過去の独立監査で `HARNESS_PASS`、Organization版は `ORG_HARNESS_PASS`・`RECORD_PASS`
 - GitHubリポジトリ準備ゲート: `BLOCKED`
+- mainへのマージ条件: 固定SHAの独立レビュー証跡と取締役会代表の承認を経て、専用のGatekeeper Appが発行する7件のstatusがすべて成功していること（正本は [harness/github_enforcement.md](harness/github_enforcement.md)）。
 - 文書・ハーネス整備: 初回固定SHAは `HARNESS_LOCAL_PASS` でしたが、後続の再監査で必須check集合の自己宣言、失敗記録の契約曖昧さ・lease解放負試験不足、失敗証跡なしでのlease解放が順に見つかり、3候補を `FAIL` として差し戻しました。最新指摘を修正した候補は自己検証186/186に合格し、最終独立再監査待ちです。GitHub/Notionへの外部反映、製品PASS、merge承認はまだありません。
 - 初回のGitHub反映: 文書・ローカル検証器だけのdraft PRとし、実行workflow、merge、branch protection変更は含めません。starterに実体のある品質scriptを別タスクで用意してからworkflowを導入します。
 - GitHub記載先: `uk-product-lab/sns-marketing-manager`（Public）

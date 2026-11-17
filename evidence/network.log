@@ -1,0 +1,27 @@
+# Browser network, reviewer probe, http://127.0.0.1:50367
+# format: METHOD STATUS RESOURCE-TYPE URL
+
+## chromium-mac-1440x900 (chromium 153.0.8010.12, 1440x900)
+responses: 3; HTTP>=400: 0; failed requests: 0; external (non http://127.0.0.1:50367) requests attempted: 0
+GET 200 document http://127.0.0.1:50367/
+GET 200 stylesheet http://127.0.0.1:50367/assets/index-dgKAOOru.css
+GET 200 script http://127.0.0.1:50367/assets/index-CkzNRMTa.js
+
+## chromium-macbook-1512x982 (chromium 153.0.8010.12, 1512x982)
+responses: 3; HTTP>=400: 0; failed requests: 0; external (non http://127.0.0.1:50367) requests attempted: 0
+GET 200 document http://127.0.0.1:50367/
+GET 200 stylesheet http://127.0.0.1:50367/assets/index-dgKAOOru.css
+GET 200 script http://127.0.0.1:50367/assets/index-CkzNRMTa.js
+
+## webkit-iphone-390x844 (webkit 26.6, 390x844)
+responses: 3; HTTP>=400: 0; failed requests: 0; external (non http://127.0.0.1:50367) requests attempted: 0
+GET 200 document http://127.0.0.1:50367/
+GET 200 stylesheet http://127.0.0.1:50367/assets/index-dgKAOOru.css
+GET 200 script http://127.0.0.1:50367/assets/index-CkzNRMTa.js
+
+## webkit-iphone-393x852 (webkit 26.6, 393x852)
+responses: 3; HTTP>=400: 0; failed requests: 0; external (non http://127.0.0.1:50367) requests attempted: 0
+GET 200 document http://127.0.0.1:50367/
+GET 200 stylesheet http://127.0.0.1:50367/assets/index-dgKAOOru.css
+GET 200 script http://127.0.0.1:50367/assets/index-CkzNRMTa.js
+

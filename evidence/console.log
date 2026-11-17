@@ -1,0 +1,14 @@
+# Browser console, reviewer probe, http://127.0.0.1:50367
+
+## chromium-mac-1440x900 (chromium 153.0.8010.12, 1440x900)
+console messages: 0 (error: 0, warning: 0); uncaught page errors: 0
+
+## chromium-macbook-1512x982 (chromium 153.0.8010.12, 1512x982)
+console messages: 0 (error: 0, warning: 0); uncaught page errors: 0
+
+## webkit-iphone-390x844 (webkit 26.6, 390x844)
+console messages: 0 (error: 0, warning: 0); uncaught page errors: 0
+
+## webkit-iphone-393x852 (webkit 26.6, 393x852)
+console messages: 0 (error: 0, warning: 0); uncaught page errors: 0
+

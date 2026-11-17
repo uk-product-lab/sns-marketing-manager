@@ -1,0 +1,99 @@
+# Commands executed by the independent reviewer (TASK-0014, gate QA-20261118-GATE-POSITIVE-TRIAL)
+# cwd for every command: <worktree> (detached at the fixed SHA). Times are UTC.
+# Environment: env -i with PATH, HOME, TMPDIR, LANG, CI=true, TZ=Asia/Tokyo, NO_COLOR=1, WRANGLER_SEND_METRICS=false, npm_config_audit=false, npm_config_fund=false
+# plus, per command: SNS_CI_PRODUCT_ROOT/SNS_CI_OUTPUT/SNS_CI_BROWSER/SNS_E2E_PORT (run A), STAGE (probe), SNS_E2E_PORT/PLAYWRIGHT_HTML_OUTPUT_DIR/PLAYWRIGHT_HTML_OPEN/PLAYWRIGHT_JUNIT_OUTPUT_FILE (run B).
+# Local absolute paths are written as placeholders: <worktree>, <private-raw>, <evidence>, <reviewer-tools>.
+# rawLogSha256 is the digest of the unpublished raw output kept by the reviewer (it contains local paths).
+
+[2026-11-17T18:19:39.000Z -> 2026-11-17T18:19:43.000Z] exit=0 npm-ci :: install (offline only)
+  $ npm ci --offline
+  rawLogSha256=be0421e5644677a2bbbbac34f5711718da8c2a4fa3797eea66c62d9db014e114
+
+[2026-11-17T18:19:50.000Z -> 2026-11-17T18:19:50.000Z] exit=0 test-boundaries :: static
+  $ npm run test:boundaries
+  rawLogSha256=035cf298df2c8d1c4f5ed3f34c410008a626609582429de370809a245b681792
+
+[2026-11-17T18:19:50.000Z -> 2026-11-17T18:19:51.000Z] exit=0 typecheck :: static
+  $ npm run typecheck
+  rawLogSha256=d67665fdc102a73fd2a06d6bea06d691be2bf12608354d0f05ec2c34ed30531a
+
+[2026-11-17T18:19:52.000Z -> 2026-11-17T18:19:54.000Z] exit=0 lint :: static
+  $ npm run lint
+  rawLogSha256=f8bb8c0040030d6bbb8fe48e76f478ab5897bbc996109681607cfeabcbb0fe67
+
+[2026-11-17T18:19:54.000Z -> 2026-11-17T18:19:56.000Z] exit=0 test-unit :: static (unit)
+  $ npm run test:unit -- --retry=0
+  rawLogSha256=9ff9686d0a0a95a14cee243ca25f00c627a9723dd6260ebf1c7bfee5f81b200c
+
+[2026-11-17T18:19:56.000Z -> 2026-11-17T18:20:00.000Z] exit=0 test-migration :: static (D1 migration)
+  $ npm run test:migration
+  rawLogSha256=20fc6864f786e839c567abb6ab2a69bb2fdb3b439025c7125860ddafd875664d
+
+[2026-11-17T18:20:00.000Z -> 2026-11-17T18:20:02.000Z] exit=0 build :: static (production build)
+  $ npm run build
+  rawLogSha256=613c6c90cd2e1dfb815818af044e1c2b4d1e8d13723c11d293ee910138111fa6
+
+[2026-11-17T18:20:16.000Z -> 2026-11-17T18:20:18.000Z] exit=0 smoke :: extra: smoke
+  $ npm run test:smoke
+  rawLogSha256=32c8eac594b7652d17a030e91fa02920030ec7899e63925cdcc469b4bf1ddcb4
+
+[2026-11-17T18:20:27.000Z -> 2026-11-17T18:20:29.000Z] exit=0 e2e-chromium-build :: run A (CI contract) e2e-chromium
+  $ npm run build
+  rawLogSha256=49acd1f8866bd5dc1e6d3ecf8651dcbe41c74fbc1dead48c21b2e1c8b3b7a206
+
+[2026-11-17T18:20:29.000Z -> 2026-11-17T18:20:33.000Z] exit=0 e2e-chromium-playwright :: run A (CI contract) e2e-chromium, trace on
+  $ node node_modules/@playwright/test/cli.js test --config harness/scripts/ci-playwright.config.mjs --project=chromium-mac-1440x900 --project=chromium-macbook-1512x982 --workers=1 --retries=0 --forbid-only --trace=on --output=<private-raw>/gates/e2e-chromium/test-results
+  rawLogSha256=5e737f2bcb52d982456e98c335441be79947412c26e3862499b077ad31d4df5a
+
+[2026-11-17T18:20:33.000Z -> 2026-11-17T18:20:35.000Z] exit=0 e2e-webkit-mobile-build :: run A (CI contract) e2e-webkit-mobile
+  $ npm run build
+  rawLogSha256=613c6c90cd2e1dfb815818af044e1c2b4d1e8d13723c11d293ee910138111fa6
+
+[2026-11-17T18:20:35.000Z -> 2026-11-17T18:20:40.000Z] exit=0 e2e-webkit-mobile-playwright :: run A (CI contract) e2e-webkit-mobile, trace on
+  $ node node_modules/@playwright/test/cli.js test --config harness/scripts/ci-playwright.config.mjs --project=webkit-iphone-390x844 --project=webkit-iphone-393x852 --workers=1 --retries=0 --forbid-only --trace=on --output=<private-raw>/gates/e2e-webkit-mobile/test-results
+  rawLogSha256=60f264300503770b5361e745f86d2120bf52924b503db53d080b1e0a5c8e3b37
+
+[2026-11-17T18:20:40.000Z -> 2026-11-17T18:20:41.000Z] exit=0 accessibility-build :: run A (CI contract) accessibility
+  $ npm run build
+  rawLogSha256=e9434449811bff6dd27cd30b223c90bdd8ab868f9f69e65cfcf53e333a84f2f8
+
+[2026-11-17T18:20:41.000Z -> 2026-11-17T18:20:46.000Z] exit=0 accessibility-axe :: run A (CI contract) accessibility probe
+  $ node harness/scripts/ci-axe-probe.mjs
+  rawLogSha256=e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+[2026-11-17T18:23:11.000Z -> 2026-11-17T18:23:13.000Z] exit=0 evidence-build :: reviewer probe
+  $ npm run build
+  rawLogSha256=613c6c90cd2e1dfb815818af044e1c2b4d1e8d13723c11d293ee910138111fa6
+
+[2026-11-17T18:23:13.000Z -> 2026-11-17T18:23:21.000Z] exit=1 evidence-probe :: reviewer probe run 1 (criterion later revised, see summary.md)
+  $ node - < <reviewer-tools>/probe.cjs
+  rawLogSha256=a2ebedc523675370328ad74a82e7811e4867bf6c2d92649503f926bf1c5b99c3
+
+[2026-11-17T18:24:45.000Z -> 2026-11-17T18:24:53.000Z] exit=1 evidence-probe-run2 :: reviewer probe run 2 (criterion later revised, see summary.md)
+  $ node - < <reviewer-tools>/probe.cjs
+  rawLogSha256=1be3c996d615db34d1bc1e057ea489b2853e9cbf439844d6d5d32ea03d09663c
+
+[2026-11-17T18:25:30.000Z -> 2026-11-17T18:25:38.000Z] exit=0 evidence-probe-run3 :: reviewer probe run 3 (published results)
+  $ node - < <reviewer-tools>/probe.cjs
+  rawLogSha256=b8f43974d012ce3cab15116b49e1f8fa904b0132d4a2b0addeaed93dce7e0ad9
+
+[2026-11-17T18:26:02.000Z -> 2026-11-17T18:26:03.000Z] exit=0 runB-build :: run B (product Playwright config)
+  $ npm run build
+  rawLogSha256=ea159cbfa7f03267d033f8316c945ff81928f7c37e9557f3229f6b73b425029f
+
+[2026-11-17T18:26:03.000Z -> 2026-11-17T18:26:10.000Z] exit=0 runB-playwright :: run B (product Playwright config): published JUnit and HTML report
+  $ node node_modules/@playwright/test/cli.js test --reporter=list,junit,html --workers=1 --retries=0 --forbid-only --output=<private-raw>/runB-test-results
+  rawLogSha256=fff8aa2245861941cbe6e1b5198b1c4764da52ce1d25559edb08a293d63dfa8a
+
+[2026-11-17T18:29:22.000Z -> 2026-11-17T18:29:24.000Z] exit=0 unit-public-log :: unit tests again, output written to unit-tests.log
+  $ npm run test:unit -- --retry=0 | sed s#<worktree-abs>#<worktree>#g
+  rawLogSha256=(output is unit-tests.log in this folder)
+
+# Not run through the logger (read-only checks):
+  git rev-parse HEAD; git status --porcelain=v1 --untracked-files=all   (start, after each gate, end)
+  git diff --numstat/--name-status <base> <fixed>; byte comparison of the added line with the task contract
+  git cat-file -e <fixed>:harness/github_enforcement.md
+  node harness/scripts/assert-harness-diff.mjs <base> <fixed>   -> exit 0, "Diff policy passed for 1 changed files (product)"
+  gh api --method GET repos/<owner>/<repo>/pulls/12 | /pulls/12/files | /git/ref/heads/main | /compare/<base>...<fixed> | /git/commits/<fixed> | /commits/<fixed>/check-runs
+  node node_modules/@playwright/test/cli.js install --dry-run chromium webkit   (browsers already installed, nothing downloaded)
+  built-in desktop browser (Chromium based): navigate, resize, Tab, Enter, click at the four sizes

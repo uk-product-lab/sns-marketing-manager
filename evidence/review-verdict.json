@@ -1,0 +1,19 @@
+{
+  "gateId": "QA-20261118-GATE-POSITIVE-TRIAL",
+  "taskId": "TASK-0014",
+  "pullRequest": 12,
+  "fixedCommitSha": "2f71d8d1a0341abd46fc540097af8f4ca9baa31b",
+  "implementationLeaseId": "35b4891e-d9e1-46e1-b53e-fa8bf094ec95",
+  "reviewLeaseId": "4a965164-0f4e-40d0-bb37-add727ff1f88",
+  "implementerSession": "claude-impl-0014-20261118-273d",
+  "reviewerSession": "claude-review-0014-20261118-6ead",
+  "verdict": "PASS",
+  "recommendation": "MERGE_CANDIDATE",
+  "requiredTestCount": 18,
+  "passedTestCount": 18,
+  "skippedTestCount": 0,
+  "requiredRegressionIds": [],
+  "executedRegressionIds": [],
+  "testStartedAt": "2026-11-17T18:19:38.000Z",
+  "testedAt": "2026-11-17T18:29:26.000Z"
+}

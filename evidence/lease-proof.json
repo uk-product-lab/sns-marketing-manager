@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "implementation": {
+    "leaseId": "35b4891e-d9e1-46e1-b53e-fa8bf094ec95",
+    "taskId": "TASK-0014",
+    "role": "implementer",
+    "agent": "claude",
+    "agentSession": "claude-impl-0014-20261118-273d",
+    "branch": "claude/issue-0014-gate-positive-trial",
+    "implementationLeaseId": null,
+    "fixedCommitSha": "2f71d8d1a0341abd46fc540097af8f4ca9baa31b",
+    "startedAt": "2026-11-17T17:59:54.311Z",
+    "expiresAt": "2026-11-17T23:59:54.311Z",
+    "outcome": "SELF_TESTED",
+    "releasedAt": "2026-11-17T18:08:27.736Z",
+    "releasedBy": "ceo"
+  },
+  "review": {
+    "leaseId": "4a965164-0f4e-40d0-bb37-add727ff1f88",
+    "taskId": "TASK-0014",
+    "role": "reviewer",
+    "agent": "claude",
+    "agentSession": "claude-review-0014-20261118-6ead",
+    "branch": "claude/issue-0014-gate-positive-trial",
+    "implementationLeaseId": "35b4891e-d9e1-46e1-b53e-fa8bf094ec95",
+    "fixedCommitSha": "2f71d8d1a0341abd46fc540097af8f4ca9baa31b",
+    "startedAt": "2026-11-17T18:12:20.492Z",
+    "expiresAt": "2026-11-18T02:12:20.492Z",
+    "outcome": "PASS",
+    "releasedAt": "2026-11-17T18:34:58.968Z",
+    "releasedBy": "ceo"
+  }
+}

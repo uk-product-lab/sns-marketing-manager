@@ -1,0 +1,26 @@
+<testsuites id="" name="" tests="8" failures="0" skipped="0" errors="0" time="6.551082999999999">
+<testsuite name="app-shell.spec.ts" timestamp="2026-11-17T18:26:04.730Z" hostname="chromium-mac-1440x900" tests="2" failures="0" skipped="0" time="0.7" errors="0">
+<testcase name="foundation app shell › renders and operates without external requests, overflow, or serious accessibility violations" classname="app-shell.spec.ts" time="0.554">
+</testcase>
+<testcase name="foundation app shell › detects a synthetic HTTP 500 response" classname="app-shell.spec.ts" time="0.146">
+</testcase>
+</testsuite>
+<testsuite name="app-shell.spec.ts" timestamp="2026-11-17T18:26:04.730Z" hostname="chromium-macbook-1512x982" tests="2" failures="0" skipped="0" time="0.699" errors="0">
+<testcase name="foundation app shell › renders and operates without external requests, overflow, or serious accessibility violations" classname="app-shell.spec.ts" time="0.548">
+</testcase>
+<testcase name="foundation app shell › detects a synthetic HTTP 500 response" classname="app-shell.spec.ts" time="0.151">
+</testcase>
+</testsuite>
+<testsuite name="app-shell.spec.ts" timestamp="2026-11-17T18:26:04.730Z" hostname="webkit-iphone-390x844" tests="2" failures="0" skipped="0" time="1.396" errors="0">
+<testcase name="foundation app shell › renders and operates without external requests, overflow, or serious accessibility violations" classname="app-shell.spec.ts" time="1.093">
+</testcase>
+<testcase name="foundation app shell › detects a synthetic HTTP 500 response" classname="app-shell.spec.ts" time="0.303">
+</testcase>
+</testsuite>
+<testsuite name="app-shell.spec.ts" timestamp="2026-11-17T18:26:04.730Z" hostname="webkit-iphone-393x852" tests="2" failures="0" skipped="0" time="1.349" errors="0">
+<testcase name="foundation app shell › renders and operates without external requests, overflow, or serious accessibility violations" classname="app-shell.spec.ts" time="1.039">
+</testcase>
+<testcase name="foundation app shell › detects a synthetic HTTP 500 response" classname="app-shell.spec.ts" time="0.31">
+</testcase>
+</testsuite>
+</testsuites>

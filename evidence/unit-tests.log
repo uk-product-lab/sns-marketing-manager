@@ -1,0 +1,23 @@
+
+> sns-marketing-manager@0.1.0 test:unit
+> vitest run --reporter=verbose --retry=0
+
+
+ RUN  v5.0.1 <worktree>
+
+ ✓ e2e/http-response-policy.unit.ts > HTTP response policy > allows HTTP 200 1ms
+ ✓ e2e/http-response-policy.unit.ts > HTTP response policy > allows HTTP 204 0ms
+ ✓ e2e/http-response-policy.unit.ts > HTTP response policy > allows HTTP 301 0ms
+ ✓ e2e/http-response-policy.unit.ts > HTTP response policy > allows HTTP 399 0ms
+ ✓ e2e/http-response-policy.unit.ts > HTTP response policy > rejects HTTP 400 0ms
+ ✓ e2e/http-response-policy.unit.ts > HTTP response policy > rejects HTTP 404 0ms
+ ✓ e2e/http-response-policy.unit.ts > HTTP response policy > rejects HTTP 500 0ms
+ ✓ e2e/http-response-policy.unit.ts > HTTP response policy > rejects HTTP 503 0ms
+ ✓ src/App.test.tsx > foundation app shell > explains the current foundation-only phase 48ms
+ ✓ src/App.test.tsx > foundation app shell > opens and closes the checklist with an accessible button 34ms
+
+ Test Files  2 passed (2)
+      Tests  10 passed (10)
+   Start at  03:29:23
+   Duration  734ms (environment 63%, setup 20%, tests 7%, transform 6%, import 4%, worker 1%)
+

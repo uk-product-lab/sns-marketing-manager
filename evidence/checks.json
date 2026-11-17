@@ -1,0 +1,172 @@
+{
+  "gateId": "QA-20261118-GATE-POSITIVE-TRIAL",
+  "fixedCommitSha": "2f71d8d1a0341abd46fc540097af8f4ca9baa31b",
+  "total": 26,
+  "passed": 26,
+  "failed": 0,
+  "requiredTests": {
+    "unit": 10,
+    "e2e": 8,
+    "total": 18,
+    "passed": 18,
+    "skipped": 0
+  },
+  "checks": [
+    {
+      "id": "FIX-01",
+      "group": "fixed-sha",
+      "result": "PASS",
+      "detail": "PR #12 is open, head = fixed SHA, base = main at the base SHA, default branch = main, compare status 'ahead' by 1 commit, parent of the fixed commit = base SHA (GitHub read at start and again after the tests; unchanged)"
+    },
+    {
+      "id": "FIX-02",
+      "group": "fixed-sha",
+      "result": "PASS",
+      "detail": "review worktree HEAD = fixed SHA and git status --porcelain=v1 --untracked-files=all empty at start, after every gate and at the end"
+    },
+    {
+      "id": "STA-01",
+      "group": "static",
+      "result": "PASS",
+      "detail": "diff base..fixed = README.md only, +1/-0 (git numstat and GitHub /pulls/12/files agree)"
+    },
+    {
+      "id": "STA-02",
+      "group": "static",
+      "result": "PASS",
+      "detail": "added line is byte-identical to line 21 of the task contract (sha256 of both = 786e1abb9654798ebdfc4f4266825195fdf5a69cc89dc174c577ba07e67ae046) and sits directly after the 'GitHubリポジトリ準備ゲート' line of the '現在の状態' section"
+    },
+    {
+      "id": "STA-03",
+      "group": "static",
+      "result": "PASS",
+      "detail": "relative link target harness/github_enforcement.md exists in the tree of the fixed SHA (blob 5a9ca57d)"
+    },
+    {
+      "id": "STA-04",
+      "group": "static",
+      "result": "PASS",
+      "detail": "node harness/scripts/assert-harness-diff.mjs <base> <fixed> (no governance flag): exit 0, 'Diff policy passed for 1 changed files (product)'"
+    },
+    {
+      "id": "STA-05",
+      "group": "static",
+      "result": "PASS",
+      "detail": "no change under sources/, src/, e2e/, tests/, scripts/, migrations/, .github/, harness/, skills/, package.json, lockfile; the added line contains no secret, paid API, SNS posting API or mail sending"
+    },
+    {
+      "id": "STA-06",
+      "group": "static",
+      "result": "PASS",
+      "detail": "npm run test:boundaries exit 0 (39 forbidden fixtures rejected, 9 production files clean)"
+    },
+    {
+      "id": "STA-07",
+      "group": "static",
+      "result": "PASS",
+      "detail": "npm run typecheck exit 0"
+    },
+    {
+      "id": "STA-08",
+      "group": "static",
+      "result": "PASS",
+      "detail": "npm run lint exit 0 (max-warnings 0)"
+    },
+    {
+      "id": "STA-09",
+      "group": "static",
+      "result": "PASS",
+      "detail": "npm run test:unit -- --retry=0: 10/10 passed, 0 skipped, executed twice with the same result (unit-tests.log is the second execution)"
+    },
+    {
+      "id": "STA-10",
+      "group": "static",
+      "result": "PASS",
+      "detail": "npm run test:migration exit 0 (local D1: initial apply, safe reapply, columns, constraints, STRICT)"
+    },
+    {
+      "id": "STA-11",
+      "group": "static",
+      "result": "PASS",
+      "detail": "npm run build exit 0 (tsc --noEmit and vite build)"
+    },
+    {
+      "id": "STA-12",
+      "group": "static",
+      "result": "PASS",
+      "detail": "no test deleted, skipped or weakened: the diff touches no test file; no .skip/.only/.fixme/.todo in e2e, src, tests, scripts"
+    },
+    {
+      "id": "STA-13",
+      "group": "static-extra",
+      "result": "PASS",
+      "detail": "npm run test:smoke exit 0 (HTTP 200, text/html)"
+    },
+    {
+      "id": "E2E-01",
+      "group": "browser",
+      "result": "PASS",
+      "detail": "run A, CI contract command, Chromium 1440x900 and 1512x982, trace on: 4/4 passed, retry 0, skip 0, one trace per test"
+    },
+    {
+      "id": "E2E-02",
+      "group": "browser",
+      "result": "PASS",
+      "detail": "run A, CI contract command, WebKit 390x844 and 393x852 (mobile emulation), trace on: 4/4 passed, retry 0, skip 0, one trace per test"
+    },
+    {
+      "id": "E2E-03",
+      "group": "browser",
+      "result": "PASS",
+      "detail": "run B, product Playwright config, all four projects: tests=8 failures=0 skipped=0 errors=0 (test-results.xml, playwright-report/)"
+    },
+    {
+      "id": "A11Y-01",
+      "group": "accessibility",
+      "result": "PASS",
+      "detail": "run A, CI accessibility probe (harness/scripts/ci-axe-probe.mjs): 4 viewports, HTTP 200, 0 errors, axe 4.13.0 violations 0"
+    },
+    {
+      "id": "A11Y-02",
+      "group": "accessibility",
+      "result": "PASS",
+      "detail": "reviewer probe, axe 4.13.0, 4 viewports x 2 states (expanded, collapsed): critical+serious 0, all violations 0 (accessibility.json)"
+    },
+    {
+      "id": "PROBE-chromium-mac-1440x900",
+      "group": "browser",
+      "result": "PASS",
+      "detail": "reviewer probe: 31/31 checks passed (chromium 153.0.8010.12); keyboard Tab/Enter/Space, click, focus indicator, 44px targets, names, no horizontal overflow, console/network clean, 320 CSS px reflow, 200% enlargement (browser-checks.json)"
+    },
+    {
+      "id": "PROBE-chromium-macbook-1512x982",
+      "group": "browser",
+      "result": "PASS",
+      "detail": "reviewer probe: 31/31 checks passed (chromium 153.0.8010.12); keyboard Tab/Enter/Space, click, focus indicator, 44px targets, names, no horizontal overflow, console/network clean, 320 CSS px reflow, 200% enlargement (browser-checks.json)"
+    },
+    {
+      "id": "PROBE-webkit-iphone-390x844",
+      "group": "browser",
+      "result": "PASS",
+      "detail": "reviewer probe: 31/31 checks passed (webkit 26.6); keyboard Tab/Enter/Space, tap, focus indicator, 44px targets, names, no horizontal overflow, console/network clean, 320 CSS px reflow, 200% enlargement (browser-checks.json)"
+    },
+    {
+      "id": "PROBE-webkit-iphone-393x852",
+      "group": "browser",
+      "result": "PASS",
+      "detail": "reviewer probe: 31/31 checks passed (webkit 26.6); keyboard Tab/Enter/Space, tap, focus indicator, 44px targets, names, no horizontal overflow, console/network clean, 320 CSS px reflow, 200% enlargement (browser-checks.json)"
+    },
+    {
+      "id": "MANUAL-01",
+      "group": "browser",
+      "result": "PASS",
+      "detail": "built-in desktop browser (Chromium based, headed), 1440x900, 1512x982, 390x844, 393x852: page loads, Tab focuses the toggle (outline solid 4px), Enter opens (aria-expanded true, 3 items, note visible), mouse click closes, no horizontal overflow, no console message, only 127.0.0.1 requests with status 200/304"
+    },
+    {
+      "id": "NET-01",
+      "group": "browser",
+      "result": "PASS",
+      "detail": "no request to any host other than 127.0.0.1 in any run; no SNS, paid or mail endpoint contacted"
+    }
+  ]
+}

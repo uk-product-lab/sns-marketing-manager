@@ -1,0 +1,97 @@
+{
+  "gateId": "QA-20261118-GATE-POSITIVE-TRIAL",
+  "taskId": "TASK-0014",
+  "pullRequest": 12,
+  "fixedCommitSha": "2f71d8d1a0341abd46fc540097af8f4ca9baa31b",
+  "baseBranch": "main",
+  "baseSha": "6df69fe7d3b81cb5f4c7631add25a29d602d291d",
+  "testStartedAt": "2026-11-17T18:19:38.000Z",
+  "testedAt": "2026-11-17T18:29:26.000Z",
+  "reviewLease": {
+    "leaseId": "4a965164-0f4e-40d0-bb37-add727ff1f88",
+    "startedAt": "2026-11-17T18:12:20.492Z",
+    "expiresAt": "2026-11-18T02:12:20.492Z"
+  },
+  "platform": {
+    "os": "macOS 26.7.3 (25G342)",
+    "kernel": "darwin",
+    "arch": "arm64"
+  },
+  "runtime": {
+    "node": "v24.15.0",
+    "npm": "11.12.1",
+    "timezoneForTests": "Asia/Tokyo"
+  },
+  "packages": {
+    "@playwright/test": "1.63.0",
+    "playwright-core": "1.63.0",
+    "@axe-core/playwright": "4.13.0",
+    "axe-core": "4.13.0",
+    "vite": "7.3.6",
+    "vitest": "5.0.1",
+    "typescript": "5.9.3",
+    "eslint": "10.11.0",
+    "wrangler": "4.143.1",
+    "react": "19.3.0"
+  },
+  "browsers": {
+    "chromium": {
+      "version": "153.0.8010.12",
+      "playwrightBuild": "chromium-1243 / chromium_headless_shell-1243",
+      "mode": "headless"
+    },
+    "webkit": {
+      "version": "26.6",
+      "playwrightBuild": "webkit-2359",
+      "mode": "headless, mobile emulation (deviceScaleFactor 2, hasTouch, isMobile)"
+    },
+    "builtInDesktopBrowser": {
+      "engine": "Chromium 156 based desktop app browser pane",
+      "mode": "headed, viewport emulation, operated by the reviewer"
+    }
+  },
+  "viewports": [
+    {
+      "project": "chromium-mac-1440x900",
+      "browserName": "chromium",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      }
+    },
+    {
+      "project": "chromium-macbook-1512x982",
+      "browserName": "chromium",
+      "viewport": {
+        "width": 1512,
+        "height": 982
+      }
+    },
+    {
+      "project": "webkit-iphone-390x844",
+      "browserName": "webkit",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      }
+    },
+    {
+      "project": "webkit-iphone-393x852",
+      "browserName": "webkit",
+      "viewport": {
+        "width": 393,
+        "height": 852
+      }
+    }
+  ],
+  "application": {
+    "served": "vite preview of the production build of the fixed SHA on 127.0.0.1 (random free port)",
+    "data": "no database, clock, account or external service is used by the app shell; D1 migrations are tested locally by test:migration"
+  },
+  "dependencyInstall": "npm ci --offline (283 packages, no network)",
+  "limitations": [
+    "Local review on one Mac; not real Safari and not a physical iPhone.",
+    "harness/scripts/ci-quality.mjs was not used: its evidence parser needs Python with Expat >= 2.7.2 and this machine has Expat 2.6.3. The same quality commands were run directly.",
+    "Published traces come from the reviewer probe. The Playwright test-runner traces of run A embed local absolute paths and are kept unpublished."
+  ]
+}

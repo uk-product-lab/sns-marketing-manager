@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "gateId": "QA-20261118-GATE-POSITIVE-TRIAL",
+  "taskId": "TASK-0014",
+  "pullRequest": 12,
+  "fixedCommitSha": "2f71d8d1a0341abd46fc540097af8f4ca9baa31b",
+  "testStartedAt": "2026-11-17T18:19:38.000Z",
+  "testedAt": "2026-11-17T18:29:26.000Z",
+  "evidenceSha256": "1db46be9780b967f78e8d8043d459a558fff5dbbdcf57cb8caf6f9bbfcb88b25",
+  "evidenceBytes": 5536592,
+  "evidenceFileCount": 38
+}

@@ -1,0 +1,1310 @@
+{
+  "baseURL": "http://127.0.0.1:50357",
+  "tool": "Playwright library (reviewer probe, separate from the product E2E suite)",
+  "projects": [
+    {
+      "project": "chromium-mac-1440x900",
+      "browserName": "chromium",
+      "browserVersion": "153.0.8010.12",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "mobileEmulation": null,
+      "startedAt": "2026-11-17T18:24:46.223Z",
+      "endedAt": "2026-11-17T18:24:47.845Z",
+      "tracingStopped": true,
+      "passed": 30,
+      "failed": 1,
+      "checks": [
+        {
+          "id": "load-http-200",
+          "result": "PASS",
+          "observed": {
+            "status": 200
+          }
+        },
+        {
+          "id": "title",
+          "result": "PASS",
+          "observed": {
+            "title": "SNS Marketing Manager"
+          }
+        },
+        {
+          "id": "single-h1",
+          "result": "PASS",
+          "observed": {
+            "h1": [
+              "SNS Marketing Manager"
+            ]
+          }
+        },
+        {
+          "id": "status-region-text",
+          "result": "PASS",
+          "observed": {
+            "status": "現在は基盤準備中です。SNS管理機能や外部サービス接続はまだ実装していません。"
+          }
+        },
+        {
+          "id": "viewport-applied",
+          "result": "PASS",
+          "observed": {
+            "viewport": {
+              "width": 1440,
+              "height": 900
+            }
+          }
+        },
+        {
+          "id": "no-horizontal-overflow-initial",
+          "result": "PASS",
+          "observed": {
+            "scrollWidth": 1440,
+            "clientWidth": 1440
+          }
+        },
+        {
+          "id": "keyboard-tab-focuses-toggle",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を表示",
+            "outlineStyle": "solid",
+            "outlineWidth": "4px",
+            "boxShadow": "none"
+          }
+        },
+        {
+          "id": "focus-indicator-visible",
+          "result": "PASS",
+          "observed": {
+            "outlineStyle": "solid",
+            "outlineWidth": "4px",
+            "boxShadow": "none"
+          }
+        },
+        {
+          "id": "touch-targets-44px-collapsed",
+          "result": "PASS",
+          "observed": [
+            {
+              "tag": "button",
+              "name": "確認項目を表示",
+              "width": 295,
+              "height": 48,
+              "left": 916,
+              "right": 1211
+            }
+          ]
+        },
+        {
+          "id": "interactive-elements-have-names",
+          "result": "PASS",
+          "observed": [
+            "確認項目を表示"
+          ]
+        },
+        {
+          "id": "controls-inside-viewport-width",
+          "result": "PASS",
+          "observed": [
+            {
+              "left": 916,
+              "right": 1211
+            }
+          ]
+        },
+        {
+          "id": "keyboard-enter-opens-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "true",
+            "ariaControls": "foundation-details",
+            "controlledExists": true
+          }
+        },
+        {
+          "id": "details-list-three-items",
+          "result": "PASS",
+          "observed": {
+            "items": [
+              "MacとiPhone相当の画面幅を自動検証",
+              "ローカルD1でマイグレーションを検証",
+              "外部サービスへの通信を行わない"
+            ]
+          }
+        },
+        {
+          "id": "focus-stays-on-toggle-after-open",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を閉じる"
+          }
+        },
+        {
+          "id": "no-horizontal-overflow-expanded",
+          "result": "PASS",
+          "observed": {
+            "scrollWidth": 1440,
+            "clientWidth": 1440
+          }
+        },
+        {
+          "id": "touch-targets-44px-expanded",
+          "result": "PASS",
+          "observed": [
+            {
+              "tag": "button",
+              "name": "確認項目を閉じる",
+              "width": 295,
+              "height": 48,
+              "left": 916,
+              "right": 1211
+            }
+          ]
+        },
+        {
+          "id": "keyboard-enter-closes-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "false"
+          }
+        },
+        {
+          "id": "focus-stays-on-toggle-after-close",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を表示"
+          }
+        },
+        {
+          "id": "keyboard-space-toggles",
+          "result": "PASS",
+          "observed": {
+            "opened": true,
+            "closed": true
+          }
+        },
+        {
+          "id": "click-opens-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "true"
+          }
+        },
+        {
+          "id": "guardrail-section-rendered",
+          "result": "PASS",
+          "observed": {
+            "guardrails": [
+              "画面",
+              "データ",
+              "外部接続"
+            ]
+          }
+        },
+        {
+          "id": "axe-expanded-no-critical-serious",
+          "result": "PASS",
+          "observed": {
+            "violations": 0,
+            "criticalOrSerious": 0,
+            "passes": 32,
+            "incomplete": 0
+          }
+        },
+        {
+          "id": "axe-collapsed-no-critical-serious",
+          "result": "PASS",
+          "observed": {
+            "violations": 0,
+            "criticalOrSerious": 0,
+            "passes": 30,
+            "incomplete": 0
+          }
+        },
+        {
+          "id": "reflow-320-css-px-no-horizontal-overflow",
+          "result": "PASS",
+          "observed": {
+            "cssViewport": {
+              "width": 320,
+              "height": 900
+            },
+            "scrollWidth": 320,
+            "clientWidth": 320,
+            "maxScrollX": 0,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 0,
+            "h1FontSizePx": 48,
+            "bodyTextFontSizePx": 17.28
+          }
+        },
+        {
+          "id": "zoom-200-page-zoom-no-loss-of-content",
+          "result": "PASS",
+          "observed": {
+            "cssViewport": {
+              "width": 720,
+              "height": 450
+            },
+            "criterion": "no horizontal scrolling",
+            "horizontalScrollNeeded": false,
+            "toggleOperatedByKeyboard": true,
+            "scrollWidth": 720,
+            "clientWidth": 720,
+            "maxScrollX": 0,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 0,
+            "h1FontSizePx": 68,
+            "bodyTextFontSizePx": 17.28
+          }
+        },
+        {
+          "id": "zoom-200-text-only-no-loss-of-content",
+          "result": "FAIL",
+          "observed": {
+            "cssViewport": {
+              "width": 1440,
+              "height": 900
+            },
+            "bodyTextScale": 1.6,
+            "h1Scale": 1.1,
+            "scrollWidth": 1440,
+            "clientWidth": 1440,
+            "maxScrollX": 0,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 0,
+            "h1FontSizePx": 100.8,
+            "bodyTextFontSizePx": 34.56
+          }
+        },
+        {
+          "id": "no-console-errors",
+          "result": "PASS",
+          "observed": {
+            "consoleErrors": 0,
+            "consoleWarnings": 0,
+            "pageErrors": 0,
+            "consoleMessages": 0
+          }
+        },
+        {
+          "id": "no-failed-requests",
+          "result": "PASS",
+          "observed": {
+            "failedRequests": []
+          }
+        },
+        {
+          "id": "no-http-4xx-5xx",
+          "result": "PASS",
+          "observed": {
+            "badResponses": []
+          }
+        },
+        {
+          "id": "no-external-requests",
+          "result": "PASS",
+          "observed": {
+            "externalRequests": []
+          }
+        },
+        {
+          "id": "all-requests-local",
+          "result": "PASS",
+          "observed": {
+            "requests": 3
+          }
+        }
+      ]
+    },
+    {
+      "project": "chromium-macbook-1512x982",
+      "browserName": "chromium",
+      "browserVersion": "153.0.8010.12",
+      "viewport": {
+        "width": 1512,
+        "height": 982
+      },
+      "mobileEmulation": null,
+      "startedAt": "2026-11-17T18:24:47.845Z",
+      "endedAt": "2026-11-17T18:24:49.429Z",
+      "tracingStopped": true,
+      "passed": 30,
+      "failed": 1,
+      "checks": [
+        {
+          "id": "load-http-200",
+          "result": "PASS",
+          "observed": {
+            "status": 200
+          }
+        },
+        {
+          "id": "title",
+          "result": "PASS",
+          "observed": {
+            "title": "SNS Marketing Manager"
+          }
+        },
+        {
+          "id": "single-h1",
+          "result": "PASS",
+          "observed": {
+            "h1": [
+              "SNS Marketing Manager"
+            ]
+          }
+        },
+        {
+          "id": "status-region-text",
+          "result": "PASS",
+          "observed": {
+            "status": "現在は基盤準備中です。SNS管理機能や外部サービス接続はまだ実装していません。"
+          }
+        },
+        {
+          "id": "viewport-applied",
+          "result": "PASS",
+          "observed": {
+            "viewport": {
+              "width": 1512,
+              "height": 982
+            }
+          }
+        },
+        {
+          "id": "no-horizontal-overflow-initial",
+          "result": "PASS",
+          "observed": {
+            "scrollWidth": 1512,
+            "clientWidth": 1512
+          }
+        },
+        {
+          "id": "keyboard-tab-focuses-toggle",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を表示",
+            "outlineStyle": "solid",
+            "outlineWidth": "4px",
+            "boxShadow": "none"
+          }
+        },
+        {
+          "id": "focus-indicator-visible",
+          "result": "PASS",
+          "observed": {
+            "outlineStyle": "solid",
+            "outlineWidth": "4px",
+            "boxShadow": "none"
+          }
+        },
+        {
+          "id": "touch-targets-44px-collapsed",
+          "result": "PASS",
+          "observed": [
+            {
+              "tag": "button",
+              "name": "確認項目を表示",
+              "width": 295,
+              "height": 48,
+              "left": 952,
+              "right": 1247
+            }
+          ]
+        },
+        {
+          "id": "interactive-elements-have-names",
+          "result": "PASS",
+          "observed": [
+            "確認項目を表示"
+          ]
+        },
+        {
+          "id": "controls-inside-viewport-width",
+          "result": "PASS",
+          "observed": [
+            {
+              "left": 952,
+              "right": 1247
+            }
+          ]
+        },
+        {
+          "id": "keyboard-enter-opens-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "true",
+            "ariaControls": "foundation-details",
+            "controlledExists": true
+          }
+        },
+        {
+          "id": "details-list-three-items",
+          "result": "PASS",
+          "observed": {
+            "items": [
+              "MacとiPhone相当の画面幅を自動検証",
+              "ローカルD1でマイグレーションを検証",
+              "外部サービスへの通信を行わない"
+            ]
+          }
+        },
+        {
+          "id": "focus-stays-on-toggle-after-open",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を閉じる"
+          }
+        },
+        {
+          "id": "no-horizontal-overflow-expanded",
+          "result": "PASS",
+          "observed": {
+            "scrollWidth": 1512,
+            "clientWidth": 1512
+          }
+        },
+        {
+          "id": "touch-targets-44px-expanded",
+          "result": "PASS",
+          "observed": [
+            {
+              "tag": "button",
+              "name": "確認項目を閉じる",
+              "width": 295,
+              "height": 48,
+              "left": 952,
+              "right": 1247
+            }
+          ]
+        },
+        {
+          "id": "keyboard-enter-closes-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "false"
+          }
+        },
+        {
+          "id": "focus-stays-on-toggle-after-close",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を表示"
+          }
+        },
+        {
+          "id": "keyboard-space-toggles",
+          "result": "PASS",
+          "observed": {
+            "opened": true,
+            "closed": true
+          }
+        },
+        {
+          "id": "click-opens-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "true"
+          }
+        },
+        {
+          "id": "guardrail-section-rendered",
+          "result": "PASS",
+          "observed": {
+            "guardrails": [
+              "画面",
+              "データ",
+              "外部接続"
+            ]
+          }
+        },
+        {
+          "id": "axe-expanded-no-critical-serious",
+          "result": "PASS",
+          "observed": {
+            "violations": 0,
+            "criticalOrSerious": 0,
+            "passes": 32,
+            "incomplete": 0
+          }
+        },
+        {
+          "id": "axe-collapsed-no-critical-serious",
+          "result": "PASS",
+          "observed": {
+            "violations": 0,
+            "criticalOrSerious": 0,
+            "passes": 30,
+            "incomplete": 0
+          }
+        },
+        {
+          "id": "reflow-320-css-px-no-horizontal-overflow",
+          "result": "PASS",
+          "observed": {
+            "cssViewport": {
+              "width": 320,
+              "height": 982
+            },
+            "scrollWidth": 320,
+            "clientWidth": 320,
+            "maxScrollX": 0,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 0,
+            "h1FontSizePx": 48,
+            "bodyTextFontSizePx": 17.28
+          }
+        },
+        {
+          "id": "zoom-200-page-zoom-no-loss-of-content",
+          "result": "PASS",
+          "observed": {
+            "cssViewport": {
+              "width": 756,
+              "height": 491
+            },
+            "criterion": "no horizontal scrolling",
+            "horizontalScrollNeeded": false,
+            "toggleOperatedByKeyboard": true,
+            "scrollWidth": 756,
+            "clientWidth": 756,
+            "maxScrollX": 0,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 0,
+            "h1FontSizePx": 68,
+            "bodyTextFontSizePx": 17.28
+          }
+        },
+        {
+          "id": "zoom-200-text-only-no-loss-of-content",
+          "result": "FAIL",
+          "observed": {
+            "cssViewport": {
+              "width": 1512,
+              "height": 982
+            },
+            "bodyTextScale": 1.6,
+            "h1Scale": 1.15,
+            "scrollWidth": 1512,
+            "clientWidth": 1512,
+            "maxScrollX": 0,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 0,
+            "h1FontSizePx": 105.84,
+            "bodyTextFontSizePx": 34.56
+          }
+        },
+        {
+          "id": "no-console-errors",
+          "result": "PASS",
+          "observed": {
+            "consoleErrors": 0,
+            "consoleWarnings": 0,
+            "pageErrors": 0,
+            "consoleMessages": 0
+          }
+        },
+        {
+          "id": "no-failed-requests",
+          "result": "PASS",
+          "observed": {
+            "failedRequests": []
+          }
+        },
+        {
+          "id": "no-http-4xx-5xx",
+          "result": "PASS",
+          "observed": {
+            "badResponses": []
+          }
+        },
+        {
+          "id": "no-external-requests",
+          "result": "PASS",
+          "observed": {
+            "externalRequests": []
+          }
+        },
+        {
+          "id": "all-requests-local",
+          "result": "PASS",
+          "observed": {
+            "requests": 3
+          }
+        }
+      ]
+    },
+    {
+      "project": "webkit-iphone-390x844",
+      "browserName": "webkit",
+      "browserVersion": "26.6",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "mobileEmulation": {
+        "deviceScaleFactor": 2,
+        "hasTouch": true,
+        "isMobile": true
+      },
+      "startedAt": "2026-11-17T18:24:49.429Z",
+      "endedAt": "2026-11-17T18:24:51.619Z",
+      "tracingStopped": true,
+      "passed": 31,
+      "failed": 0,
+      "checks": [
+        {
+          "id": "load-http-200",
+          "result": "PASS",
+          "observed": {
+            "status": 200
+          }
+        },
+        {
+          "id": "title",
+          "result": "PASS",
+          "observed": {
+            "title": "SNS Marketing Manager"
+          }
+        },
+        {
+          "id": "single-h1",
+          "result": "PASS",
+          "observed": {
+            "h1": [
+              "SNS Marketing Manager"
+            ]
+          }
+        },
+        {
+          "id": "status-region-text",
+          "result": "PASS",
+          "observed": {
+            "status": "現在は基盤準備中です。SNS管理機能や外部サービス接続はまだ実装していません。"
+          }
+        },
+        {
+          "id": "viewport-applied",
+          "result": "PASS",
+          "observed": {
+            "viewport": {
+              "width": 390,
+              "height": 844
+            }
+          }
+        },
+        {
+          "id": "no-horizontal-overflow-initial",
+          "result": "PASS",
+          "observed": {
+            "scrollWidth": 390,
+            "clientWidth": 390
+          }
+        },
+        {
+          "id": "keyboard-tab-focuses-toggle",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を表示",
+            "outlineStyle": "solid",
+            "outlineWidth": "4px",
+            "boxShadow": "none"
+          }
+        },
+        {
+          "id": "focus-indicator-visible",
+          "result": "PASS",
+          "observed": {
+            "outlineStyle": "solid",
+            "outlineWidth": "4px",
+            "boxShadow": "none"
+          }
+        },
+        {
+          "id": "touch-targets-44px-collapsed",
+          "result": "PASS",
+          "observed": [
+            {
+              "tag": "button",
+              "name": "確認項目を表示",
+              "width": 304,
+              "height": 48,
+              "left": 43,
+              "right": 347
+            }
+          ]
+        },
+        {
+          "id": "interactive-elements-have-names",
+          "result": "PASS",
+          "observed": [
+            "確認項目を表示"
+          ]
+        },
+        {
+          "id": "controls-inside-viewport-width",
+          "result": "PASS",
+          "observed": [
+            {
+              "left": 43,
+              "right": 347
+            }
+          ]
+        },
+        {
+          "id": "keyboard-enter-opens-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "true",
+            "ariaControls": "foundation-details",
+            "controlledExists": true
+          }
+        },
+        {
+          "id": "details-list-three-items",
+          "result": "PASS",
+          "observed": {
+            "items": [
+              "MacとiPhone相当の画面幅を自動検証",
+              "ローカルD1でマイグレーションを検証",
+              "外部サービスへの通信を行わない"
+            ]
+          }
+        },
+        {
+          "id": "focus-stays-on-toggle-after-open",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を閉じる"
+          }
+        },
+        {
+          "id": "no-horizontal-overflow-expanded",
+          "result": "PASS",
+          "observed": {
+            "scrollWidth": 390,
+            "clientWidth": 390
+          }
+        },
+        {
+          "id": "touch-targets-44px-expanded",
+          "result": "PASS",
+          "observed": [
+            {
+              "tag": "button",
+              "name": "確認項目を閉じる",
+              "width": 304,
+              "height": 48,
+              "left": 43,
+              "right": 347
+            }
+          ]
+        },
+        {
+          "id": "keyboard-enter-closes-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "false"
+          }
+        },
+        {
+          "id": "focus-stays-on-toggle-after-close",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を表示"
+          }
+        },
+        {
+          "id": "keyboard-space-toggles",
+          "result": "PASS",
+          "observed": {
+            "opened": true,
+            "closed": true
+          }
+        },
+        {
+          "id": "tap-opens-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "true"
+          }
+        },
+        {
+          "id": "guardrail-section-rendered",
+          "result": "PASS",
+          "observed": {
+            "guardrails": [
+              "画面",
+              "データ",
+              "外部接続"
+            ]
+          }
+        },
+        {
+          "id": "axe-expanded-no-critical-serious",
+          "result": "PASS",
+          "observed": {
+            "violations": 0,
+            "criticalOrSerious": 0,
+            "passes": 32,
+            "incomplete": 0
+          }
+        },
+        {
+          "id": "axe-collapsed-no-critical-serious",
+          "result": "PASS",
+          "observed": {
+            "violations": 0,
+            "criticalOrSerious": 0,
+            "passes": 30,
+            "incomplete": 0
+          }
+        },
+        {
+          "id": "reflow-320-css-px-no-horizontal-overflow",
+          "result": "PASS",
+          "observed": {
+            "cssViewport": {
+              "width": 320,
+              "height": 844
+            },
+            "scrollWidth": 320,
+            "clientWidth": 320,
+            "maxScrollX": 0,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 0,
+            "h1FontSizePx": 48,
+            "bodyTextFontSizePx": 17.280001
+          }
+        },
+        {
+          "id": "zoom-200-page-zoom-no-loss-of-content",
+          "result": "PASS",
+          "observed": {
+            "cssViewport": {
+              "width": 195,
+              "height": 422
+            },
+            "criterion": "below 320 CSS px: horizontal scrolling allowed, no content or function lost",
+            "horizontalScrollNeeded": true,
+            "toggleOperatedByKeyboard": true,
+            "scrollWidth": 320,
+            "clientWidth": 195,
+            "maxScrollX": 125,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 20,
+            "h1FontSizePx": 43.200001,
+            "bodyTextFontSizePx": 17.280001
+          }
+        },
+        {
+          "id": "zoom-200-text-only-no-loss-of-content",
+          "result": "PASS",
+          "observed": {
+            "cssViewport": {
+              "width": 390,
+              "height": 844
+            },
+            "bodyTextScale": 2,
+            "h1Scale": 1.48,
+            "scrollWidth": 390,
+            "clientWidth": 390,
+            "maxScrollX": 0,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 0,
+            "h1FontSizePx": 86.400002,
+            "bodyTextFontSizePx": 34.560001
+          }
+        },
+        {
+          "id": "no-console-errors",
+          "result": "PASS",
+          "observed": {
+            "consoleErrors": 0,
+            "consoleWarnings": 0,
+            "pageErrors": 0,
+            "consoleMessages": 0
+          }
+        },
+        {
+          "id": "no-failed-requests",
+          "result": "PASS",
+          "observed": {
+            "failedRequests": []
+          }
+        },
+        {
+          "id": "no-http-4xx-5xx",
+          "result": "PASS",
+          "observed": {
+            "badResponses": []
+          }
+        },
+        {
+          "id": "no-external-requests",
+          "result": "PASS",
+          "observed": {
+            "externalRequests": []
+          }
+        },
+        {
+          "id": "all-requests-local",
+          "result": "PASS",
+          "observed": {
+            "requests": 3
+          }
+        }
+      ]
+    },
+    {
+      "project": "webkit-iphone-393x852",
+      "browserName": "webkit",
+      "browserVersion": "26.6",
+      "viewport": {
+        "width": 393,
+        "height": 852
+      },
+      "mobileEmulation": {
+        "deviceScaleFactor": 2,
+        "hasTouch": true,
+        "isMobile": true
+      },
+      "startedAt": "2026-11-17T18:24:51.619Z",
+      "endedAt": "2026-11-17T18:24:53.722Z",
+      "tracingStopped": true,
+      "passed": 31,
+      "failed": 0,
+      "checks": [
+        {
+          "id": "load-http-200",
+          "result": "PASS",
+          "observed": {
+            "status": 200
+          }
+        },
+        {
+          "id": "title",
+          "result": "PASS",
+          "observed": {
+            "title": "SNS Marketing Manager"
+          }
+        },
+        {
+          "id": "single-h1",
+          "result": "PASS",
+          "observed": {
+            "h1": [
+              "SNS Marketing Manager"
+            ]
+          }
+        },
+        {
+          "id": "status-region-text",
+          "result": "PASS",
+          "observed": {
+            "status": "現在は基盤準備中です。SNS管理機能や外部サービス接続はまだ実装していません。"
+          }
+        },
+        {
+          "id": "viewport-applied",
+          "result": "PASS",
+          "observed": {
+            "viewport": {
+              "width": 393,
+              "height": 852
+            }
+          }
+        },
+        {
+          "id": "no-horizontal-overflow-initial",
+          "result": "PASS",
+          "observed": {
+            "scrollWidth": 393,
+            "clientWidth": 393
+          }
+        },
+        {
+          "id": "keyboard-tab-focuses-toggle",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を表示",
+            "outlineStyle": "solid",
+            "outlineWidth": "4px",
+            "boxShadow": "none"
+          }
+        },
+        {
+          "id": "focus-indicator-visible",
+          "result": "PASS",
+          "observed": {
+            "outlineStyle": "solid",
+            "outlineWidth": "4px",
+            "boxShadow": "none"
+          }
+        },
+        {
+          "id": "touch-targets-44px-collapsed",
+          "result": "PASS",
+          "observed": [
+            {
+              "tag": "button",
+              "name": "確認項目を表示",
+              "width": 307,
+              "height": 48,
+              "left": 43,
+              "right": 350
+            }
+          ]
+        },
+        {
+          "id": "interactive-elements-have-names",
+          "result": "PASS",
+          "observed": [
+            "確認項目を表示"
+          ]
+        },
+        {
+          "id": "controls-inside-viewport-width",
+          "result": "PASS",
+          "observed": [
+            {
+              "left": 43,
+              "right": 350
+            }
+          ]
+        },
+        {
+          "id": "keyboard-enter-opens-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "true",
+            "ariaControls": "foundation-details",
+            "controlledExists": true
+          }
+        },
+        {
+          "id": "details-list-three-items",
+          "result": "PASS",
+          "observed": {
+            "items": [
+              "MacとiPhone相当の画面幅を自動検証",
+              "ローカルD1でマイグレーションを検証",
+              "外部サービスへの通信を行わない"
+            ]
+          }
+        },
+        {
+          "id": "focus-stays-on-toggle-after-open",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を閉じる"
+          }
+        },
+        {
+          "id": "no-horizontal-overflow-expanded",
+          "result": "PASS",
+          "observed": {
+            "scrollWidth": 393,
+            "clientWidth": 393
+          }
+        },
+        {
+          "id": "touch-targets-44px-expanded",
+          "result": "PASS",
+          "observed": [
+            {
+              "tag": "button",
+              "name": "確認項目を閉じる",
+              "width": 307,
+              "height": 48,
+              "left": 43,
+              "right": 350
+            }
+          ]
+        },
+        {
+          "id": "keyboard-enter-closes-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "false"
+          }
+        },
+        {
+          "id": "focus-stays-on-toggle-after-close",
+          "result": "PASS",
+          "observed": {
+            "tag": "button",
+            "text": "確認項目を表示"
+          }
+        },
+        {
+          "id": "keyboard-space-toggles",
+          "result": "PASS",
+          "observed": {
+            "opened": true,
+            "closed": true
+          }
+        },
+        {
+          "id": "tap-opens-details",
+          "result": "PASS",
+          "observed": {
+            "ariaExpanded": "true"
+          }
+        },
+        {
+          "id": "guardrail-section-rendered",
+          "result": "PASS",
+          "observed": {
+            "guardrails": [
+              "画面",
+              "データ",
+              "外部接続"
+            ]
+          }
+        },
+        {
+          "id": "axe-expanded-no-critical-serious",
+          "result": "PASS",
+          "observed": {
+            "violations": 0,
+            "criticalOrSerious": 0,
+            "passes": 32,
+            "incomplete": 0
+          }
+        },
+        {
+          "id": "axe-collapsed-no-critical-serious",
+          "result": "PASS",
+          "observed": {
+            "violations": 0,
+            "criticalOrSerious": 0,
+            "passes": 30,
+            "incomplete": 0
+          }
+        },
+        {
+          "id": "reflow-320-css-px-no-horizontal-overflow",
+          "result": "PASS",
+          "observed": {
+            "cssViewport": {
+              "width": 320,
+              "height": 852
+            },
+            "scrollWidth": 320,
+            "clientWidth": 320,
+            "maxScrollX": 0,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 0,
+            "h1FontSizePx": 48,
+            "bodyTextFontSizePx": 17.280001
+          }
+        },
+        {
+          "id": "zoom-200-page-zoom-no-loss-of-content",
+          "result": "PASS",
+          "observed": {
+            "cssViewport": {
+              "width": 196,
+              "height": 426
+            },
+            "criterion": "below 320 CSS px: horizontal scrolling allowed, no content or function lost",
+            "horizontalScrollNeeded": true,
+            "toggleOperatedByKeyboard": true,
+            "scrollWidth": 320,
+            "clientWidth": 196,
+            "maxScrollX": 124,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 20,
+            "h1FontSizePx": 43.200001,
+            "bodyTextFontSizePx": 17.280001
+          }
+        },
+        {
+          "id": "zoom-200-text-only-no-loss-of-content",
+          "result": "PASS",
+          "observed": {
+            "cssViewport": {
+              "width": 393,
+              "height": 852
+            },
+            "bodyTextScale": 2,
+            "h1Scale": 1.47,
+            "scrollWidth": 393,
+            "clientWidth": 393,
+            "maxScrollX": 0,
+            "beyondPage": 0,
+            "clippedText": 0,
+            "outsideViewport": 0,
+            "h1FontSizePx": 86.400002,
+            "bodyTextFontSizePx": 34.560001
+          }
+        },
+        {
+          "id": "no-console-errors",
+          "result": "PASS",
+          "observed": {
+            "consoleErrors": 0,
+            "consoleWarnings": 0,
+            "pageErrors": 0,
+            "consoleMessages": 0
+          }
+        },
+        {
+          "id": "no-failed-requests",
+          "result": "PASS",
+          "observed": {
+            "failedRequests": []
+          }
+        },
+        {
+          "id": "no-http-4xx-5xx",
+          "result": "PASS",
+          "observed": {
+            "badResponses": []
+          }
+        },
+        {
+          "id": "no-external-requests",
+          "result": "PASS",
+          "observed": {
+            "externalRequests": []
+          }
+        },
+        {
+          "id": "all-requests-local",
+          "result": "PASS",
+          "observed": {
+            "requests": 3
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -396,7 +396,10 @@ test("workflow trust, runtime, real commands, seven statuses and board isolation
   assert.equal((verify.match(/persist-credentials: false/g) ?? []).length, 2);
   assert.equal((quality.match(/persist-credentials: false/g) ?? []).length, 2);
   assert.match(gate, /environment:\n      name: board-review/); assert.match(gate, /secrets.GATEKEEPER_APP_PRIVATE_KEY/);
-  assert.doesNotMatch(independent, /environment:|secrets\.|GATEKEEPER|createCommitStatus/); assert.doesNotMatch(gate, /: write(?<!issues: write)/);
+  assert.doesNotMatch(independent, /environment:|secrets\.|GATEKEEPER|createCommitStatus/); assert.doesNotMatch(gate, /: write(?<!\n      issues: write)(?<!\n      pull-requests: write)/);
+  // TASK-0015: the built-in token of the gate writes only issues and pull requests (the review labels), and only in the protected board job.
+  const gateJobs = gate.split("\n  board:\n"); assert.equal(gateJobs.length, 2); assert.doesNotMatch(gateJobs[0], /: write/);
+  assert.deepEqual(gateJobs[1].match(/.*: write.*/g), ["      pull-requests: write", "      issues: write"]);
   const contexts = gateHelper.split("export const STATUS_CONTEXTS = [")[1].split("];", 1)[0];
   assert.equal((contexts.match(/"(?:governance|quality|review)\//g) ?? []).length, 7);
   assert.doesNotMatch(quality, /secrets\.|: write/);

@@ -829,7 +829,8 @@ test("BGT-001 the scheduled workflow has no Environment job and dispatches only 
   assert.equal(dispatch.if.includes("||"), false); assert.equal(dispatch.if.includes("always()"), false);
   // Only the dispatching job may write Actions; nothing else changed its permissions.
   assert.deepEqual(dispatch.permissions, { contents: "read", actions: "write", "pull-requests": "read" });
-  assert.deepEqual(prepare.permissions, { contents: "read", issues: "write", "pull-requests": "read" });
+  // TASK-0015: the labels sit on a pull request, so the job that swaps them writes pull requests as well as issues.
+  assert.deepEqual(prepare.permissions, { contents: "read", issues: "write", "pull-requests": "write" });
   assert.deepEqual(verify.permissions, { contents: "read", "pull-requests": "read" });
   assertGateSteps(dispatch);
   const scripts = stepsOf(dispatch);
@@ -870,7 +871,7 @@ test("BGT-002/004/005 the board gate workflow rejects before checkout, protects 
   for (const condition of ["needs.preflight.outputs.verified == 'true'", "github.repository == 'uk-product-lab/sns-marketing-manager'", "github.ref == 'refs/heads/main'",
     "github.run_attempt == 1", "github.actor == 'github-actions[bot]'", "github.triggering_actor == 'github-actions[bot]'"]) assert.ok(board.if.includes(condition), condition);
   assert.deepEqual(board.environment, { name: "board-review" }); assert.equal(board.name, "review/board-gate");
-  assert.deepEqual(board.permissions, { contents: "read", actions: "read", "pull-requests": "read", issues: "write" });
+  assert.deepEqual(board.permissions, { contents: "read", actions: "read", "pull-requests": "write", issues: "write" });
   for (const job of Object.values(workflow.jobs)) { assertGateSteps(job); assert.equal(JSON.stringify(job.permissions).includes('"actions":"write"'), false); assert.equal(job.permissions.statuses, undefined); }
   assert.deepEqual(preflight.outputs, { verified: "${{ steps.guard.outputs.verified }}", environment: "${{ steps.guard.outputs.environment }}" });
   assert.ok(stepsOf(preflight).includes("runBoardGateStage('guard'")); assert.ok(stepsOf(preflight).indexOf("core.setOutput('verified', 'true')") > stepsOf(preflight).indexOf("runBoardGateStage('guard'"));
@@ -895,6 +896,38 @@ test("BGT-002/004/005 the board gate workflow rejects before checkout, protects 
   assert.equal(/approvePendingDeployment|pending_deployments|rerun|dispatches/.test(text), false);
   const uploads = Object.values(workflow.jobs).flatMap((job) => job.steps).filter((step) => step.uses?.startsWith("actions/upload-artifact@"));
   assert.equal(uploads.length, 2); for (const upload of uploads) assert.ok(upload.if.includes("steps.budget.outcome == 'success'"));
+});
+
+test("GLP-002/003 only the two label jobs write issues and pull requests, only the dispatch job writes Actions, and the label jobs run no pull request code", () => {
+  // TASK-0015. Parsed from the workflow files only: this does not show that a real run changed a label.
+  const writers = {}, jobs = {};
+  for (const name of ["independent-review.yml", "board-gate.yml"]) {
+    const workflow = loadWorkflow(name);
+    assert.deepEqual(workflow.permissions, {});
+    for (const [key, job] of Object.entries(workflow.jobs)) {
+      jobs[`${name}:${key}`] = job;
+      assert.equal(Object.prototype.toString.call(job.permissions), "[object Object]", key);
+      for (const [scope, level] of Object.entries(job.permissions)) {
+        assert.ok(level === "read" || level === "write", `${name}:${key}:${scope}`);
+        if (level === "write") (writers[`${name}:${key}`] ??= []).push(scope);
+      }
+    }
+  }
+  assert.deepEqual(Object.keys(jobs), ["independent-review.yml:prepare", "independent-review.yml:verify", "independent-review.yml:dispatch",
+    "board-gate.yml:boundary", "board-gate.yml:preflight", "board-gate.yml:board"]);
+  assert.deepEqual(Object.fromEntries(Object.entries(writers).map(([key, scopes]) => [key, scopes.sort()])), {
+    "independent-review.yml:prepare": ["issues", "pull-requests"],
+    "independent-review.yml:dispatch": ["actions"],
+    "board-gate.yml:board": ["issues", "pull-requests"],
+  });
+  // A job that may write pull requests has no shell step, and checks out nothing but the trusted run commit.
+  const labelJobs = Object.entries(jobs).filter(([, job]) => job.permissions["pull-requests"] === "write");
+  assert.deepEqual(labelJobs.map(([key]) => key), ["independent-review.yml:prepare", "board-gate.yml:board"]);
+  for (const [, job] of labelJobs) assertGateSteps(job);
+  const prepare = jobs["independent-review.yml:prepare"], board = jobs["board-gate.yml:board"];
+  assert.equal(prepare.steps.length, 1); assert.match(prepare.steps[0].uses, /^actions\/github-script@[a-f0-9]{40}$/);
+  assert.deepEqual(Object.keys(prepare.steps[0].with), ["script"]); assert.equal(/\bimport\(|\beval\(|child_process|new Function/.test(prepare.steps[0].with.script), false);
+  assert.deepEqual(board.steps.filter((step) => step.uses?.startsWith("actions/checkout@")).map((step) => step.with.ref), ["${{ github.sha }}"]);
 });
 
 // Job conditions, evaluated the way GitHub schedules jobs for the forms used in these

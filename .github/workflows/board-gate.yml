@@ -205,7 +205,7 @@ jobs:
     permissions:
       contents: read
       actions: read
-      pull-requests: read
+      pull-requests: write
       issues: write
     steps:
       # Trusted main harness only. This job never checks out or runs pull request code.

@@ -17,7 +17,7 @@ jobs:
     permissions:
       contents: read
       issues: write
-      pull-requests: read
+      pull-requests: write
     outputs:
       found: ${{ steps.select.outputs.found }}
       pull_request: ${{ steps.select.outputs.pull_request }}
